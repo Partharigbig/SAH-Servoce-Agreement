@@ -1,25 +1,26 @@
 /******************************************************************************************
- * MC_SAHOpportunityDocGen
- * Generate Support at Home Agreement Document from Opportunity
+ * MC_SAHOpportunityDocGen_Direct
+ * Support at Home Agreement – Direct Field Mapping (no Document_Mappings__c)
  *
- * Flow-invocable
- * Data Path: Opportunity → Account → ContactContactRelation → Funding → Funding Item
- * Uses Document_Mappings__c for token substitution.
+ * Tokens produced (top-level keys):
+ *   Opportunity.* , Account.* ,
+ *   CCRList[] (RelatedContact & CCR fields),
+ *   FundingList[] ,
+ *   FundingItemList[] (with FundingTier and currency display fields),
+ *   showPartG_AT_HM, showPartH_Restorative, showPartI_EndOfLife
  ******************************************************************************************/
-public without sharing class MC_SAHOpportunityDocGen {
+public without sharing class MC_SAHOpportunityDocGen_Direct {
 
     public class Wrapper {
         @InvocableVariable(required=true)
         public List<Id> recordIds;                 // Opportunity Id(s) – first used
-
         @InvocableVariable(required=true)
         public String docTemplateName;             // DocumentTemplate.Name
-
         @InvocableVariable(required=true)
-        public String templateContentVersionId;    // ContentVersion.Id of template
+        public String templateContentVersionId;    // ContentVersion.Id
     }
 
-    @InvocableMethod(label='Generate Support at Home Agreement')
+    @InvocableMethod(label='Generate SAH Agreement (Direct)')
     public static void generateFromFlow(List<Wrapper> inputs) {
         if (inputs == null || inputs.isEmpty() || inputs[0].recordIds == null || inputs[0].recordIds.isEmpty()) {
             throw new AuraHandledException('No Opportunity Id provided.');
@@ -30,168 +31,188 @@ public without sharing class MC_SAHOpportunityDocGen {
     private static void process(Wrapper w) {
         Id oppId = w.recordIds[0];
 
-        // --- Query Opportunity (all fields)
-        String oppSoql = queryAllFields('Opportunity', oppId, '');
-        List<SObject> oppList = Database.query(oppSoql);
-        if (oppList.isEmpty()) return;
-        SObject opp = oppList[0];
+        // --- Opportunity (explicit fields)
+        Opportunity opp = [
+            SELECT Id, Name, StageName, CloseDate, Amount, AccountId, Funding_Source__c
+            FROM Opportunity
+            WHERE Id = :oppId
+            LIMIT 1
+        ];
 
-        // --- Gate: Only run if Funding_Source__c = 'Support at Home'
-        if ((String)opp.get('Funding_Source__c') != 'Support at Home') {
-            return;
+        // Gate: only for Support at Home
+        if (opp.Funding_Source__c != 'Support at Home') return;
+
+        // --- Account (parent)
+        Account acc = null;
+        if (opp.AccountId != null) {
+            acc = [
+                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
+                       BillingStreet, BillingCity, BillingState, BillingPostalCode,
+                       PersonContactId, FirstName, LastName, Date_of_Birth__c
+                FROM Account
+                WHERE Id = :opp.AccountId
+                LIMIT 1
+            ];
         }
 
-        // --- Query Account (all fields)
-        SObject acc;
-        Id accId = (Id)opp.get('AccountId');
-        if (accId != null) {
-            String accSoql = queryAllFields('Account', accId, '');
-            List<SObject> accList = Database.query(accSoql);
-            if (!accList.isEmpty()) acc = accList[0];
-        }
+        // --- Funding (child of Opportunity)
+        List<maica_cc__Funding__c> fundingList = [
+            SELECT Id, Name, maica_cc__Start_Date__c, maica_cc__End_Date__c, maica_cc__Funding_Type__c
+            FROM maica_cc__Funding__c
+            WHERE maica_cc__Opportunity__c = :opp.Id
+        ];
 
-        // --- Query ContactContactRelation (CCR) → only with Power_of_Attorney__c
-        List<SObject> ccrList = new List<SObject>();
-        if (acc != null && acc.get('PersonContactId') != null) {
-            Id pcId = (Id)acc.get('PersonContactId');
-            String ccrSoql = queryAllFields('ContactContactRelation', pcId, 'ContactId');
-            List<SObject> ccrAll = Database.query(ccrSoql);
-            for (SObject ccr : ccrAll) {
-                if (ccr.get('Power_of_Attorney__c') != null) {
-                    ccrList.add(ccr);
-                }
-            }
-        }
-
-        // --- Query Funding (child of Opportunity)
-        String fundingSoql = queryAllFields('maica_cc__Funding__c', oppId, 'maica_cc__Opportunity__c');
-        List<SObject> fundingList = Database.query(fundingSoql);
-
-        // --- Query Funding Items (child of Funding) using IN clause
-        List<SObject> fundingItemList = new List<SObject>();
+        // --- Funding Items (unrelated from Opp PoV: by Funding IN …)
+        List<maica_cc__Funding_Item__c> fundingItemList = new List<maica_cc__Funding_Item__c>();
         if (!fundingList.isEmpty()) {
             Set<Id> fundingIds = new Set<Id>();
-            for (SObject f : fundingList) fundingIds.add(f.Id);
+            for (maica_cc__Funding__c f : fundingList) fundingIds.add(f.Id);
 
-            // build dynamic field list for Funding Item
-            Schema.SObjectType fiType = Schema.getGlobalDescribe().get('maica_cc__Funding_Item__c');
-            Map<String, Schema.SObjectField> fiFields = fiType.getDescribe().fields.getMap();
-            List<String> fiFieldNames = new List<String>();
-            for (String fn : fiFields.keySet()) fiFieldNames.add(fn);
-
-            String fiSoql =
-                'SELECT ' + String.join(fiFieldNames, ',') +
-                ' FROM maica_cc__Funding_Item__c' +
-                ' WHERE maica_cc__Funding__c IN :fundingIds';
-
-            fundingItemList = Database.query(fiSoql);
+            fundingItemList = [
+                SELECT Id, Name,
+                       maica_cc__Budget_Type__c,
+                       maica_cc__Approved_Amount__c,
+                       maica_cc__Spent_Amount__c,
+                       maica_cc__Remaining_Amount__c,
+                       maica_cc__Entry_Date__c,
+                       maica_cc__Effective_Date__c,
+                       maica_cc__End_Date__c,
+                       maica_cc__Funding__c
+                FROM maica_cc__Funding_Item__c
+                WHERE maica_cc__Funding__c IN :fundingIds
+            ];
         }
 
-        // --- Section flags by Budget Type
+        // --- CCR (unrelated from Opp PoV: Account → PersonContact → CCR), only with PoA
+        List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
+        if (acc != null && acc.PersonContactId != null) {
+            ccrList = [
+                SELECT Id, ContactId, RelatedContactId,
+                       Power_of_Attorney__c, Relationship__c, PartyRoleRelationship__c, Next_of_Kin__c,
+                       RelatedContact.Name, RelatedContact.Phone, RelatedContact.Email,
+                       RelatedContact.MailingStreet, RelatedContact.MailingCity,
+                       RelatedContact.MailingState, RelatedContact.MailingPostalCode
+                FROM ContactContactRelation
+                WHERE ContactId = :acc.PersonContactId
+                  AND Power_of_Attorney__c != null
+            ];
+        }
+
+        // --- Section flags by Funding Item Budget Type
         Boolean showPartG_AT_HM = false;
         Boolean showPartH_Restorative = false;
         Boolean showPartI_EndOfLife = false;
 
-        for (SObject fi : fundingItemList) {
-            String bt = (String)fi.get('maica_cc__Budget_Type__c');
+        for (maica_cc__Funding_Item__c fi : fundingItemList) {
+            String bt = fi.maica_cc__Budget_Type__c;
             if (bt == null) continue;
             bt = bt.trim();
-            if (bt == 'Assistive technology' || bt == 'Home modifications' || bt == 'Assistive technology specified needs') {
-                showPartG_AT_HM = true;
-            }
-            if (bt == 'Restorative care pathway') {
-                showPartH_Restorative = true;
-            }
-            if (bt == 'End of life pathway') {
-                showPartI_EndOfLife = true;
-            }
+            if (bt == 'Assistive technology' || bt == 'Home modifications' || bt == 'Assistive technology specified needs') showPartG_AT_HM = true;
+            if (bt == 'Restorative care pathway') showPartH_Restorative = true;
+            if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // --- Build tokenDataMap using Document_Mappings__c
-        Map<String, Object> tokenDataMap = new Map<String, Object>();
+        // --- Build tokens (DIRECT mapping)
+        Map<String, Object> token = new Map<String, Object>();
 
-        // Query all mappings for this template
-        List<Document_Mappings__c> mappings = [
-            SELECT Id, Document_Token__c, Token_Value__c, Document_Name__c,
-                   Data_Type__c, Is_Child_Object_Mapping__c, Is_Parent_Object_Mapping__c,
-                   Is_Unrelated_Object_Mapping__c, Child_Object_APiName__c
-              FROM Document_Mappings__c
-             WHERE Document_Name__c = :w.docTemplateName
-        ];
+        // Opportunity tokens
+        token.put('OppName', opp.Name);
+        token.put('OppStage', opp.StageName);
+        token.put('OppCloseDate', formatDate(opp.CloseDate));
+        token.put('OppAmount', formatCurrency(opp.Amount));
+        token.put('FundingSource', opp.Funding_Source__c);
 
-        // Parent (Opportunity / Account) mappings
-        for (Document_Mappings__c dm : mappings) {
-            if (dm.Is_Parent_Object_Mapping__c) {
-                if (acc != null) {
-                    tokenDataMap.put(dm.Document_Token__c, acc.get(dm.Token_Value__c));
-                }
-            } else if (!dm.Is_Child_Object_Mapping__c && !dm.Is_Unrelated_Object_Mapping__c) {
-                tokenDataMap.put(dm.Document_Token__c, opp.get(dm.Token_Value__c));
-            }
+        // Account tokens
+        if (acc != null) {
+            token.put('AccountName', acc.Name);
+            token.put('AccountFirstName', acc.FirstName);
+            token.put('AccountLastName', acc.LastName);
+            token.put('AccountDOB', formatDate(acc.Date_of_Birth__c));
+            token.put('AccountPhone', acc.Phone);
+            token.put('AccountMobile', acc.PersonMobilePhone);
+            token.put('AccountEmail', acc.PersonEmail);
+            token.put('AccountBillingAddress', formatAddress(acc.BillingStreet, acc.BillingCity, acc.BillingState, acc.BillingPostalCode));
         }
 
-        // CCR child list
-        if (!ccrList.isEmpty()) {
-            List<Map<String,Object>> ccrMaps = new List<Map<String,Object>>();
-            for (SObject ccr : ccrList) {
-                Map<String,Object> row = new Map<String,Object>();
-                for (Document_Mappings__c dm : mappings) {
-                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'ContactContactRelation') {
-                        row.put(dm.Document_Token__c, ccr.get(dm.Token_Value__c));
-                    }
-                }
-                ccrMaps.add(row);
-            }
-            tokenDataMap.put('CCRList', ccrMaps);
+        // CCR tokens (list)
+        List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
+        Integer cIdx = 0;
+        for (ContactContactRelation ccr : ccrList) {
+            cIdx++;
+            Map<String, Object> row = new Map<String, Object>();
+            row.put('RelatedContactName',   ccr.RelatedContact != null ? ccr.RelatedContact.Name  : null);
+            row.put('RelatedContactPhone',  ccr.RelatedContact != null ? ccr.RelatedContact.Phone : null);
+            row.put('RelatedContactEmail',  ccr.RelatedContact != null ? ccr.RelatedContact.Email : null);
+            row.put('RelatedContactAddress', formatAddress(
+                ccr.RelatedContact != null ? ccr.RelatedContact.MailingStreet : null,
+                ccr.RelatedContact != null ? ccr.RelatedContact.MailingCity   : null,
+                ccr.RelatedContact != null ? ccr.RelatedContact.MailingState  : null,
+                ccr.RelatedContact != null ? ccr.RelatedContact.MailingPostalCode : null
+            ));
+            row.put('PowerOfAttorney', ccr.Power_of_Attorney__c);
+            row.put('Relationship', ccr.Relationship__c);
+            row.put('PartyRoleRelationship', ccr.PartyRoleRelationship__c);
+            row.put('IsNextOfKin', ccr.Next_of_Kin__c);
+            row.put('RowNumber', cIdx);
+            ccrOut.add(row);
         }
+        token.put('CCRList', ccrOut);
 
-        // Funding list
-        if (!fundingList.isEmpty()) {
-            List<Map<String,Object>> fundMaps = new List<Map<String,Object>>();
-            for (SObject f : fundingList) {
-                Map<String,Object> row = new Map<String,Object>();
-                for (Document_Mappings__c dm : mappings) {
-                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'maica_cc__Funding__c') {
-                        row.put(dm.Document_Token__c, f.get(dm.Token_Value__c));
-                    }
-                }
-                fundMaps.add(row);
-            }
-            tokenDataMap.put('FundingList', fundMaps);
+        // Funding tokens (list)
+        List<Map<String,Object>> fundingOut = new List<Map<String,Object>>();
+        for (maica_cc__Funding__c f : fundingList) {
+            Map<String,Object> row = new Map<String,Object>();
+            row.put('FundingName', f.Name);
+            row.put('FundingStartDate', formatDate(f.maica_cc__Start_Date__c));
+            row.put('FundingEndDate',   formatDate(f.maica_cc__End_Date__c));
+            row.put('FundingType',      f.maica_cc__Funding_Type__c);
+            fundingOut.add(row);
         }
+        token.put('FundingList', fundingOut);
 
-        // Funding Item list
-        if (!fundingItemList.isEmpty()) {
-            List<Map<String,Object>> fiMaps = new List<Map<String,Object>>();
-            for (SObject fi : fundingItemList) {
-                Map<String,Object> row = new Map<String,Object>();
-                for (Document_Mappings__c dm : mappings) {
-                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'maica_cc__Funding_Item__c') {
-                        row.put(dm.Document_Token__c, fi.get(dm.Token_Value__c));
-                    }
-                }
-                fiMaps.add(row);
-            }
-            tokenDataMap.put('FundingItemList', fiMaps);
+        // Funding Item tokens (list) with range slabs + display fields
+        List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
+        for (maica_cc__Funding_Item__c fi : fundingItemList) {
+            Map<String,Object> row = new Map<String,Object>();
+            row.put('FundingItemName', fi.Name);
+            row.put('BudgetType', fi.maica_cc__Budget_Type__c);
+
+            // raw values
+            row.put('ApprovedAmount',  fi.maica_cc__Approved_Amount__c);
+            row.put('SpentAmount',     fi.maica_cc__Spent_Amount__c);
+            row.put('RemainingAmount', fi.maica_cc__Remaining_Amount__c);
+            row.put('EntryDate',       formatDate(fi.maica_cc__Entry_Date__c));
+            row.put('EffectiveDate',   formatDate(fi.maica_cc__Effective_Date__c));
+            row.put('EndDate',         formatDate(fi.maica_cc__End_Date__c));
+
+            // display (currency)
+            row.put('Approved_Amount_Display',   formatCurrency(fi.maica_cc__Approved_Amount__c));
+            row.put('Spent_Amount_Display',      formatCurrency(fi.maica_cc__Spent_Amount__c));
+            row.put('Remaining_Amount_Display',  formatCurrency(fi.maica_cc__Remaining_Amount__c));
+
+            // tier (range-based)
+            row.put('FundingTier', classifyTier(fi.maica_cc__Approved_Amount__c));
+
+            fiOut.add(row);
         }
+        token.put('FundingItemList', fiOut);
 
         // Section flags
-        tokenDataMap.put('showPartG_AT_HM', showPartG_AT_HM);
-        tokenDataMap.put('showPartH_Restorative', showPartH_Restorative);
-        tokenDataMap.put('showPartI_EndOfLife', showPartI_EndOfLife);
+        token.put('showPartG_AT_HM', showPartG_AT_HM);
+        token.put('showPartH_Restorative', showPartH_Restorative);
+        token.put('showPartI_EndOfLife', showPartI_EndOfLife);
 
-        // --- Create DocumentGenerationProcess
+        // --- Create document
         DocumentTemplate tmpl = [
             SELECT Id, Name
-              FROM DocumentTemplate
-             WHERE Name = :w.docTemplateName
-               AND IsActive = true
-             LIMIT 1
+            FROM DocumentTemplate
+            WHERE Name = :w.docTemplateName AND IsActive = true
+            LIMIT 1
         ];
 
-        Map<String,Object> req = new Map<String,Object>{
+        Map<String, Object> req = new Map<String, Object>{
             'templateContentVersionId' => w.templateContentVersionId,
-            'title'                    => w.docTemplateName + '_' + (acc != null ? acc.get('Name') : opp.get('Name')),
+            'title'                    => w.docTemplateName + '_' + (acc != null ? acc.Name : opp.Name),
             'keepIntermediate'         => false
         };
 
@@ -199,29 +220,35 @@ public without sharing class MC_SAHOpportunityDocGen {
         dgp.Type                 = 'GenerateAndConvert';
         dgp.RequestText          = JSON.serialize(req);
         dgp.ReferenceObject      = opp.Id;
-        dgp.TokenData            = JSON.serialize(tokenDataMap);
+        dgp.TokenData            = JSON.serialize(token);
         dgp.DocGenApiVersionType = 'Advanced';
         dgp.DocumentTemplateId   = tmpl.Id;
 
         if (!Test.isRunningTest()) insert dgp;
     }
 
-    // --- Query all fields helper
-    public static String queryAllFields(String objectName, Id sobjectId, String relField) {
-        Schema.SObjectType objType = Schema.getGlobalDescribe().get(objectName);
-        Schema.DescribeSObjectResult describeResult = objType.getDescribe();
-        Map<String, Schema.SObjectField> fieldsMap = describeResult.fields.getMap();
-        List<String> fieldNames = new List<String>();
-        for (String f : fieldsMap.keySet()) {
-            fieldNames.add(f);
-        }
-
-        String soql;
-        if (String.isBlank(relField)) {
-            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE Id = :sobjectId';
-        } else {
-            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE ' + relField + ' = :sobjectId';
-        }
-        return soql;
+    // ===== Helpers =====
+    private static String formatDate(Date d) {
+        if (d == null) return '';
+        return Datetime.newInstance(d.year(), d.month(), d.day(), 0, 0, 0).format('dd/MM/yyyy');
+    }
+    private static String formatCurrency(Decimal v) {
+        if (v == null) return '';
+        return '$' + String.valueOf(v.setScale(2));
+    }
+    private static String formatAddress(String st, String city, String state, String pcode) {
+        List<String> parts = new List<String>();
+        if (!String.isBlank(st)) parts.add(st);
+        if (!String.isBlank(city)) parts.add(city);
+        if (!String.isBlank(state)) parts.add(state);
+        if (!String.isBlank(pcode)) parts.add(pcode);
+        return String.join(parts, ', ');
+    }
+    private static String classifyTier(Decimal amt) {
+        if (amt == null) return '';
+        if (amt <= 500)        return '$0 - $500';
+        if (amt <= 2000)       return '$501 - $2000';
+        if (amt <= 15000)      return '$2001 - $15000';
+        return 'Above $15000';
     }
 }
