@@ -1,6 +1,6 @@
 /******************************************************************************************
  * MC_SAHOpportunityDocGen_Direct
- * Support at Home Agreement – Direct Field Mapping (NO Document_Mappings__c)
+ * Support at Home Agreement – Direct Field Mapping 
  *
  * Model (from Opportunity):
  *   Parents:  Account (Opportunity.AccountId), Funding (Opportunity.Funding__c)
@@ -16,12 +16,6 @@
  *   - envContentDocVarName            [RECOMMENDED]
  *   - envTemplateNameVarName          [RECOMMENDED]
  *   - (Optional overrides) docTemplateName, templateContentVersionId
- *
- * Notes:
- *   - Uses ONLY Account.Home_Address__c* and RelatedContact.Home_Address__c* (no mailing/billing).
- *   - Funding type field is Funding_Type__c (no namespace).
- *   - Funding Item adds range-based FundingTier + currency display fields.
- *   - Section flags (showPartG/H/I) driven by Funding Item Budget Type.
  ******************************************************************************************/
 public without sharing class MC_SAHOpportunityDocGen_Direct {
 
@@ -38,7 +32,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         @InvocableVariable public String envTemplateNameVarName;      // Value__c = DocumentTemplate.Name
     }
 
-    @InvocableMethod(label='Generate SAH Agreement (Direct, Dynamic via Env Vars)')
+    @InvocableMethod(label='Generate SAH Agreement')
     public static void generateFromFlow(List<Wrapper> inputs) {
         if (inputs == null || inputs.isEmpty() || inputs[0].recordIds == null || inputs[0].recordIds.isEmpty()) {
             throw new AuraHandledException('No Opportunity Id provided.');
@@ -59,21 +53,21 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         ];
         if (opp.Funding_Source__c != 'Support at Home') return;
 
-        // --- Parent: Account (ONLY custom Home_Address__c compound)
+        // --- Parent: Account 
         Account acc = null;
         if (opp.AccountId != null) {
             acc = [
                 SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
                        FirstName, LastName, Date_of_Birth__c, PersonContactId,
-                       Home_Address__cStreet, Home_Address__cCity, Home_Address__cState,
-                       Home_Address__cPostalCode, Home_Address__cCountry
+                       Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
+                       Home_Address__PostalCode__s, Home_Address__CountryCode__s
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
             ];
         }
 
-        // --- Parent: Funding (via Opportunity.Funding__c)
+        // --- Parent: Funding 
         maica_cc__Funding__c funding = null;
         if (opp.Funding__c != null) {
             funding = [
@@ -105,16 +99,16 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             ];
         }
 
-        // --- Child of Account: CCR (PoA only) via PersonContact (ONLY RelatedContact.Home_Address__c compound)
+        // --- Child of Account
         List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
         if (acc != null && acc.PersonContactId != null) {
             ccrList = [
                 SELECT Id, ContactId, RelatedContactId,
                        Power_of_Attorney__c, Relationship__c, Next_of_Kin__c,
                        RelatedContact.Name, RelatedContact.Phone, RelatedContact.Email,
-                       RelatedContact.Home_Address__cStreet, RelatedContact.Home_Address__cCity,
-                       RelatedContact.Home_Address__cState, RelatedContact.Home_Address__cPostalCode,
-                       RelatedContact.Home_Address__cCountry
+                       RelatedContact.MailingStreet, RelatedContact.MailingCity,
+                       RelatedContact.MailingState, RelatedContact.MailingPostalCode,
+                       RelatedContact.MailingCountry
                 FROM ContactContactRelation
                 WHERE ContactId = :acc.PersonContactId
                   AND Power_of_Attorney__c != null
@@ -134,7 +128,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // --- Token map (DIRECT)
+        // --- Token map 
         Map<String, Object> token = new Map<String, Object>();
 
         // Opportunity tokens
@@ -144,7 +138,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
 
-        // Account tokens (Home Address only)
+        // Account tokens 
         if (acc != null) {
             token.put('AccountName', acc.Name);
             token.put('AccountFirstName', acc.FirstName);
@@ -154,14 +148,15 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('AccountMobile', acc.PersonMobilePhone);
             token.put('AccountEmail', acc.PersonEmail);
             token.put('AccountHomeAddress',
-                      formatAddress(acc.Home_Address__cStreet,
-                                    acc.Home_Address__cCity,
-                                    acc.Home_Address__cState,
-                                    acc.Home_Address__cPostalCode,
-                                    acc.Home_Address__cCountry));
+                      formatAddress(
+        acc.Home_Address__Street__s,
+        acc.Home_Address__City__s,
+        acc.Home_Address__StateCode__s,
+        acc.Home_Address__PostalCode__s,
+        acc.Home_Address__CountryCode__s));
         }
 
-        // Funding tokens (single parent)
+        // Funding tokens 
         if (funding != null) {
             token.put('FundingName', funding.Name);
             token.put('FundingStartDate', formatDate(funding.maica_cc__Start_Date__c));
@@ -169,7 +164,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('FundingType',      funding.Funding_Type__c);
         }
 
-        // CCR list (Home Address only)
+        // CCR list 
         List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
@@ -180,11 +175,11 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             row.put('RelatedContactEmail',  ccr.RelatedContact != null ? ccr.RelatedContact.Email : null);
             row.put('RelatedContactAddress',
                     ccr.RelatedContact != null
-                    ? formatAddress(ccr.RelatedContact.Home_Address__cStreet,
-                                    ccr.RelatedContact.Home_Address__cCity,
-                                    ccr.RelatedContact.Home_Address__cState,
-                                    ccr.RelatedContact.Home_Address__cPostalCode,
-                                    ccr.RelatedContact.Home_Address__cCountry)
+                    ? formatAddress(ccr.RelatedContact.MailingStreet,
+                                    ccr.RelatedContact.MailingCity,
+                                    ccr.RelatedContact.MailingState,
+                                    ccr.RelatedContact.MailingPostalCode,
+                                    ccr.RelatedContact.MailingCountry)
                     : null);
             row.put('PowerOfAttorney', ccr.Power_of_Attorney__c);
             row.put('Relationship',    ccr.Relationship__c);
@@ -194,7 +189,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         }
         token.put('CCRList', ccrOut);
 
-        // Funding Items list (+ slab + display)
+        // Funding Items list 
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             Map<String,Object> row = new Map<String,Object>();
