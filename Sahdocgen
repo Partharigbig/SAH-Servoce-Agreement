@@ -1,0 +1,218 @@
+/******************************************************************************************
+ * MC_SAHOpportunityDocGen
+ * Generate Support at Home Agreement Document from Opportunity
+ *
+ * Flow-invocable
+ * Entry: Opportunity
+ * Data Path: Opportunity → Account → ContactContactRelation → Funding → Funding Item
+ * Document mappings are handled via Document_Mappings__c
+ ******************************************************************************************/
+public without sharing class MC_SAHOpportunityDocGen {
+
+    public class Wrapper {
+        @InvocableVariable(required=true)
+        public List<Id> recordIds;                 // Opportunity Id(s) – first used
+
+        @InvocableVariable(required=true)
+        public String docTemplateName;             // DocumentTemplate.Name
+
+        @InvocableVariable(required=true)
+        public String templateContentVersionId;    // ContentVersion.Id of template
+    }
+
+    @InvocableMethod(label='Generate Support at Home Agreement')
+    public static void generateFromFlow(List<Wrapper> inputs) {
+        if (inputs == null || inputs.isEmpty() || inputs[0].recordIds == null || inputs[0].recordIds.isEmpty()) {
+            throw new AuraHandledException('No Opportunity Id provided.');
+        }
+        process(inputs[0]);
+    }
+
+    private static void process(Wrapper w) {
+        Id oppId = w.recordIds[0];
+
+        // --- Query Opportunity (all fields)
+        String oppSoql = queryAllFields('Opportunity', oppId, '');
+        List<SObject> oppList = Database.query(oppSoql);
+        if (oppList.isEmpty()) return;
+        SObject opp = oppList[0];
+
+        // --- Gate: Only run if Funding_Source__c = 'Support at Home'
+        if ((String)opp.get('Funding_Source__c') != 'Support at Home') {
+            return;
+        }
+
+        // --- Query Account (all fields)
+        SObject acc;
+        Id accId = (Id)opp.get('AccountId');
+        if (accId != null) {
+            String accSoql = queryAllFields('Account', accId, '');
+            List<SObject> accList = Database.query(accSoql);
+            if (!accList.isEmpty()) acc = accList[0];
+        }
+
+        // --- Query ContactContactRelation (CCR) → only with Power_of_Attorney__c
+        List<SObject> ccrList = new List<SObject>();
+        if (acc != null && acc.get('PersonContactId') != null) {
+            Id pcId = (Id)acc.get('PersonContactId');
+            String ccrSoql = queryAllFields('ContactContactRelation', pcId, 'ContactId');
+            List<SObject> ccrAll = Database.query(ccrSoql);
+            for (SObject ccr : ccrAll) {
+                if (ccr.get('Power_of_Attorney__c') != null) {
+                    ccrList.add(ccr);
+                }
+            }
+        }
+
+        // --- Query Funding (child of Opportunity)
+        String fundingSoql = queryAllFields('maica_cc__Funding__c', oppId, 'maica_cc__Opportunity__c');
+        List<SObject> fundingList = Database.query(fundingSoql);
+
+        // --- Query Funding Items (child of Funding)
+        List<SObject> fundingItemList = new List<SObject>();
+        if (!fundingList.isEmpty()) {
+            Set<Id> fundingIds = new Set<Id>();
+            for (SObject f : fundingList) fundingIds.add(f.Id);
+            String fiSoql = queryAllFields('maica_cc__Funding_Item__c', null, 'maica_cc__Funding__c');
+            fiSoql += ' AND maica_cc__Funding__c IN :fundingIds';
+            fundingItemList = Database.query(fiSoql);
+        }
+
+        // --- Section flags by Budget Type
+        Boolean showPartG_AT_HM = false;
+        Boolean showPartH_Restorative = false;
+        Boolean showPartI_EndOfLife = false;
+
+        for (SObject fi : fundingItemList) {
+            String bt = (String)fi.get('maica_cc__Budget_Type__c');
+            if (bt == null) continue;
+            bt = bt.trim();
+            if (bt == 'Assistive technology' || bt == 'Home modifications' || bt == 'Assistive technology specified needs') {
+                showPartG_AT_HM = true;
+            }
+            if (bt == 'Restorative care pathway') {
+                showPartH_Restorative = true;
+            }
+            if (bt == 'End of life pathway') {
+                showPartI_EndOfLife = true;
+            }
+        }
+
+        // --- Build tokenDataMap using Document_Mappings__c
+        Map<String, Object> tokenDataMap = new Map<String, Object>();
+
+        // Query all mappings for this template
+        List<Document_Mappings__c> mappings = [
+            SELECT Id, Document_Token__c, Token_Value__c, Document_Name__c,
+                   Data_Type__c, Is_Child_Object_Mapping__c, Is_Parent_Object_Mapping__c,
+                   Is_Unrelated_Object_Mapping__c, Child_Object_APIName__c
+              FROM Document_Mappings__c
+             WHERE Document_Name__c = :w.docTemplateName
+        ];
+
+        // Parent (Opportunity / Account) mappings
+        for (Document_Mappings__c dm : mappings) {
+            if (dm.Is_Parent_Object_Mapping__c) {
+                if (acc != null) {
+                    tokenDataMap.put(dm.Document_Token__c, acc.get(dm.Token_Value__c));
+                }
+            } else if (!dm.Is_Child_Object_Mapping__c && !dm.Is_Unrelated_Object_Mapping__c) {
+                tokenDataMap.put(dm.Document_Token__c, opp.get(dm.Token_Value__c));
+            }
+        }
+
+        // CCR child list
+        if (!ccrList.isEmpty()) {
+            List<Map<String,Object>> ccrMaps = new List<Map<String,Object>>();
+            for (SObject ccr : ccrList) {
+                Map<String,Object> row = new Map<String,Object>();
+                for (Document_Mappings__c dm : mappings) {
+                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'ContactContactRelation') {
+                        row.put(dm.Document_Token__c, ccr.get(dm.Token_Value__c));
+                    }
+                }
+                ccrMaps.add(row);
+            }
+            tokenDataMap.put('CCRList', ccrMaps);
+        }
+
+        // Funding list
+        if (!fundingList.isEmpty()) {
+            List<Map<String,Object>> fundMaps = new List<Map<String,Object>>();
+            for (SObject f : fundingList) {
+                Map<String,Object> row = new Map<String,Object>();
+                for (Document_Mappings__c dm : mappings) {
+                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'maica_cc__Funding__c') {
+                        row.put(dm.Document_Token__c, f.get(dm.Token_Value__c));
+                    }
+                }
+                fundMaps.add(row);
+            }
+            tokenDataMap.put('FundingList', fundMaps);
+        }
+
+        // Funding Item list
+        if (!fundingItemList.isEmpty()) {
+            List<Map<String,Object>> fiMaps = new List<Map<String,Object>>();
+            for (SObject fi : fundingItemList) {
+                Map<String,Object> row = new Map<String,Object>();
+                for (Document_Mappings__c dm : mappings) {
+                    if (dm.Is_Child_Object_Mapping__c && dm.Child_Object_APiName__c == 'maica_cc__Funding_Item__c') {
+                        row.put(dm.Document_Token__c, fi.get(dm.Token_Value__c));
+                    }
+                }
+                fiMaps.add(row);
+            }
+            tokenDataMap.put('FundingItemList', fiMaps);
+        }
+
+        // Section flags
+        tokenDataMap.put('showPartG_AT_HM', showPartG_AT_HM);
+        tokenDataMap.put('showPartH_Restorative', showPartH_Restorative);
+        tokenDataMap.put('showPartI_EndOfLife', showPartI_EndOfLife);
+
+        // --- Create DocumentGenerationProcess
+        DocumentTemplate tmpl = [
+            SELECT Id, Name
+              FROM DocumentTemplate
+             WHERE Name = :w.docTemplateName
+               AND IsActive = true
+             LIMIT 1
+        ];
+
+        Map<String,Object> req = new Map<String,Object>{
+            'templateContentVersionId' => w.templateContentVersionId,
+            'title'                    => w.docTemplateName + '_' + (acc != null ? acc.get('Name') : opp.get('Name')),
+            'keepIntermediate'         => false
+        };
+
+        DocumentGenerationProcess dgp = new DocumentGenerationProcess();
+        dgp.Type                 = 'GenerateAndConvert';
+        dgp.RequestText          = JSON.serialize(req);
+        dgp.ReferenceObject      = opp.Id;
+        dgp.TokenData            = JSON.serialize(tokenDataMap);
+        dgp.DocGenApiVersionType = 'Advanced';
+        dgp.DocumentTemplateId   = tmpl.Id;
+
+        if (!Test.isRunningTest()) insert dgp;
+    }
+
+    // --- Query all fields helper
+    public static String queryAllFields(String objectName, Id sobjectId, String relField) {
+        Schema.SObjectType objType = Schema.getGlobalDescribe().get(objectName);
+        Schema.DescribeSObjectResult describeResult = objType.getDescribe();
+        Map<String, Schema.SObjectField> fieldsMap = describeResult.fields.getMap();
+        List<String> fieldNames = new List<String>();
+        for (String f : fieldsMap.keySet()) {
+            fieldNames.add(f);
+        }
+
+        String soql;
+        if (String.isBlank(relField)) {
+            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE Id = :sobjectId';
+        } else {
+            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE ' + relField + ' = :sobjectId';
+        }
+        return soql;
+    }
+}
