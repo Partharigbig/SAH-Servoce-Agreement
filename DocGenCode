@@ -1,0 +1,487 @@
+/******************************************************************************************
+Purpose : Class for Generating the Document using SF DocGen.
+Name    : MC_DocumentGenerationClass
+Author  : Cognizant
+Version : 1.0 
+
+Modification History
+Date          Who        Description  
+
+******************************************************************************************/
+public without sharing class MC_DocumentGenerationClass {
+    
+    public class DocGenWrapper{
+        @InvocableVariable
+        public List<Id> recordIds;
+        @InvocableVariable
+        public string contentVersionId;
+        @InvocableVariable
+        public string objectApiName;
+        @InvocableVariable
+        public string docTemplateName;
+        @InvocableVariable
+        public String childSobjName;
+        @InvocableVariable
+        public String childSobjRelFieldName;
+        
+        @InvocableVariable
+        public Boolean isNextOfKinApplicable;
+        @InvocableVariable
+        public String additionalChildSobjectNames;
+        @InvocableVariable
+        public Boolean isUnRelatedObjectApplicable;
+        @InvocableVariable
+        public String unRelatedObjectName;
+    }
+    
+    @InvocableMethod(label='Generate Document')
+    public static void generateDocumentFromFlow(List<DocGenWrapper> wrapperList) {
+        generateDocument(wrapperList);
+        
+    }
+    
+    public static void generateDocument(List<DocGenWrapper> wrapperList) {
+        
+        Id sObjectId = wrapperList[0].recordIds[0];
+        String objectApiName =  wrapperList[0].objectApiName; //Eternal_Feeding_Chart_Name__c
+        
+        String contentVersionId = wrapperList[0].contentVersionId;
+        String docTemplateName = wrapperList[0].docTemplateName;
+        
+        //For Child record query
+        String childSobjName = wrapperList[0].childSobjName;
+        String childSobjRelFieldName = wrapperList[0].childSobjRelFieldName;
+        
+        String childQuery = '';
+        List<Sobject> childRecords = new List<Sobject>();
+        String childQuery1 = '';
+        List<Sobject> childRecords1 = new List<Sobject>();
+        String childQuery2 = '';
+        List<Sobject> childRecords2 = new List<Sobject>();
+        //Multiple child query
+        Map<String, String> objRelFieldApiMap = getObjectApiWithRelField();
+        String checkAdditonalSojectName = wrapperList[0].additionalChildSobjectNames;
+        List<String> additionalChildSobjectNames = new List<String>();
+        if(checkAdditonalSojectName != 'false') {
+            additionalChildSobjectNames = checkAdditonalSojectName.split(';');
+        
+        }
+        Integer numberOfChildObjects = additionalChildSobjectNames.size();
+        String childSobjName1 = numberOfChildObjects > 0 ? additionalChildSobjectNames[0] : null;
+		String childSobjName2 = numberOfChildObjects > 1 ? additionalChildSobjectNames[1] : null;
+		//String childSobjName3 = numberOfChildObjects > 2 ? additionalChildSobjectNames[2] : null;
+        
+        system.debug('===============childSobjName========'+childSobjName);
+        if(childSobjName != null){
+            childQuery = queryAllFields(childSobjName, sObjectId, childSobjRelFieldName);
+            childRecords = Database.query(childQuery);
+            
+        } 
+        
+        
+        if(childSobjName1 != null) {
+            childQuery1 = queryAllFields(childSobjName1, sObjectId, objRelFieldApiMap.get(childSobjName1));
+            childRecords1 = Database.query(childQuery1);
+        }
+        if(childSobjName2 != null) {
+            childQuery2 = queryAllFields(childSobjName2, sObjectId, objRelFieldApiMap.get(childSobjName2));
+            childRecords2 = Database.query(childQuery2);
+        }
+        //Actual Form Object Query
+        String query = queryAllFields(objectApiName, sObjectId, '');
+        List<SObject> latestRecords = Database.query(query);
+        
+        if(!latestRecords.isEmpty()){
+            Sobject obj = latestRecords[0];
+            SObject parentAccountObj = obj.getSObject('Related_Account__r');
+
+            Boolean isNextOfKinApplicable = wrapperList[0].isNextOfKinApplicable;
+            Boolean isUnRelatedObjectApplicable = wrapperList[0].isUnRelatedObjectApplicable;
+            String unRelatedObjectName = wrapperList[0].unRelatedObjectName;
+            List<Sobject> allergySobjList;
+            List<Sobject> unRelatedSobjList;
+            //UnRelated Object
+            if(isUnRelatedObjectApplicable) {
+                if(unRelatedObjectName == 'Medical_Conditions__c') {
+                    String allergyQuery = queryAllFields(unRelatedObjectName,(String)parentAccountObj.get('Id'), objRelFieldApiMap.get(unRelatedObjectName));
+                    unRelatedSobjList = Database.Query(allergyQuery);
+                }
+                else if(unRelatedObjectName == 'GDCP_Goal__c') {
+                    String unrelatedObjectQuery = queryAllFields(unRelatedObjectName,(String)obj.get('Goal_Directed_Care_Plan_Form__c'), objRelFieldApiMap.get(unRelatedObjectName));
+                    unRelatedSobjList = Database.Query(unrelatedObjectQuery);
+                }
+            }
+            //end
+            //Construct the Token Map
+            Map<String, Object> tokenDataMap = new Map<String, Object>();
+            
+            List<Sobject> nextOfKinObjList;
+            if(isNextOfKinApplicable){
+                Id contactId = (Id)parentAccountObj.get('PersonContactId'); 
+                List<ContactContactRelation> ccrList = [SELECT Id,RelatedContact.Name,RelatedContact.Account.Address__c,RelatedContact.Phone, RelatedContact.Email, 
+                                                        Relationship__c, RelatedContact.Account.Comments__c
+                                                        FROM ContactContactRelation
+                                                        WHERE Next_of_Kin__c = true AND
+                                                       ContactId =: contactId ];
+                
+                List<Map<String, Object>> ccrObjectList = new List<Map<String, Object>>();
+                Integer counter = 0;
+                for(ContactContactRelation ccr : ccrList){
+                    counter = counter + 1;
+                    Map<String, Object> ccrSObjMap = new Map<String, Object>();
+                    ccrSObjMap.put('RelatedContact.Name',ccr.RelatedContact.Name);
+                    ccrSObjMap.put('RelatedContact.Account.Address__c',ccr.RelatedContact.Account.Address__c);
+                    ccrSObjMap.put('RelatedContact.Phone',ccr.RelatedContact.Phone);
+                    ccrSObjMap.put('RelatedContact.Email',ccr.RelatedContact.Email);
+                    ccrSObjMap.put('Relationship__c',ccr.Relationship__c);
+                    ccrSObjMap.put('RelatedContact.Account.Comments__c',ccr.RelatedContact.Account.Comments__c);
+                    ccrSObjMap.put('RelatedContact.counter',counter);
+                    ccrObjectList.add(ccrSObjMap);
+                }
+                
+                tokenDataMap.put('ccrObjectList', ccrObjectList);
+                
+            }
+        
+            
+            
+            //System.debug('Before docTemplate');
+            DocumentTemplate docTemplate = [ SELECT Id, Name FROM DocumentTemplate 
+                                            WHERE Name=:docTemplateName
+                                            AND IsActive = true Limit 1 ];
+            //Construct the Request Map
+            Map<String, Object> requestMap = new Map<String, Object>();
+            requestMap.put('templateContentVersionId', contentVersionId);
+            requestMap.put('title', docTemplateName+'_'+parentAccountObj.get('Name'));
+            requestMap.put('keepIntermediate', false);
+            String requestData = JSON.serialize(requestMap);
+            
+            //Query all Document Mappings
+            List<Document_Mappings__c> documentMappingsList = [SELECT Id, Document_Token__c, Is_Parent_Object_Mapping__c,Is_Child_Object_Mapping__c,Is_Unrelated_Object_Mapping__c,Unrelated_Object_Name__c, Token_Value__c, Document_Name__c, Data_Type__c, Name,Child_Object_APiName__c 
+                                                               FROM Document_Mappings__c WHERE Document_Name__c=:docTemplateName];
+            
+            
+            
+            
+            
+            // For Unrelated Object
+            if(isUnRelatedObjectApplicable){
+                List<Map<String, Object>> unRelatedObjectList = new List<Map<String, Object>>();
+                for(Sobject unRelatedObj : unRelatedSobjList){
+                    Map<String, Object> unRelatedSObjMap = new Map<String, Object>();
+                    for(Document_Mappings__c docMapping : documentMappingsList){
+                        if(docMapping.Is_Unrelated_Object_Mapping__c){
+                            if(docMapping.Unrelated_Object_Name__c != null){
+                                String token = docMapping.Document_Token__c;
+                            	Object fieldValue = unRelatedObj.get(docMapping.Token_Value__c);
+                                if (docMapping.Data_Type__c == 'Date') {
+                                	unRelatedSObjMap.put(token, formatDate((Date)fieldValue));
+                                }else{
+                                    unRelatedSObjMap.put(token, fieldValue);
+                                }
+                                
+                            }
+                        }
+                    }
+                    unRelatedObjectList.add(unRelatedSObjMap);
+                }
+                if(unRelatedObjectName=='Medical_Conditions__c'){
+                    tokenDataMap.put('allergyObjectList', unRelatedObjectList);
+                }
+                else{
+                    tokenDataMap.put('unRelatedObjectList', unRelatedObjectList);
+                }
+                
+            }
+            
+            
+            //For child object
+            if (childSobjName != null) {
+             	List<Map<String, Object>> childSobjectList = new List<Map<String, Object>>();
+                for (SObject chilSobj : childRecords) {
+                    Map<String, Object> childObjMap = new Map<String, Object>();
+                    
+                    for (Document_Mappings__c docChildMapping : documentMappingsList) {
+                        if (docChildMapping.Is_Child_Object_Mapping__c && docChildMapping.Child_Object_APiName__c == null) {
+                            String token = docChildMapping.Document_Token__c;
+                            String fieldName = docChildMapping.Token_Value__c;
+                            if (docChildMapping.Data_Type__c == 'Time') {
+                                childObjMap.put(token, formatTime((Time)chilSobj.get(fieldName)));
+                            } else if (docChildMapping.Data_Type__c == 'Date') {
+                                childObjMap.put(token, formatDate((Date)chilSobj.get(fieldName)));
+                            } else if (docChildMapping.Data_Type__c == 'Boolean') {
+                                childObjMap.put(token, transformBooleanChild(docChildMapping, chilSobj));
+                            }else if (docChildMapping.Data_Type__c == 'Date/Time') {
+                                childObjMap.put(token, formatDateTime((Datetime)chilSobj.get(fieldName)));
+                            }
+                            else {
+                                childObjMap.put(token, chilSobj.get(fieldName));
+                            }
+                        }
+                    }
+                    
+                    childSobjectList.add(childObjMap);
+                }
+                tokenDataMap.put('ChildSobjectList', childSobjectList);
+            }
+            System.debug('Before if childSobjName1'+ childSobjName1);
+            if (childSobjName1 != null) {
+                List<Map<String, Object>> childSobjectList1 = buildChildSobjectList(childRecords1,documentMappingsList,childSobjName1);
+                tokenDataMap.put('ChildSobjectList1', childSobjectList1);
+            }
+            if (childSobjName2 != null) {
+             	List<Map<String, Object>> childSobjectList2 = buildChildSobjectList(childRecords2,documentMappingsList,childSobjName2);
+                tokenDataMap.put('ChildSobjectList2', childSobjectList2);
+            }
+            
+            //Parent record loop
+            for(Document_Mappings__c docMapping : documentMappingsList){
+                if(!docMapping.Is_Child_Object_Mapping__c){
+                    if(!docMapping.Is_Parent_Object_Mapping__c){
+                        if(!docMapping.Is_Unrelated_Object_Mapping__c){
+                            if(docMapping.Data_Type__c == 'Image'){
+                                Map<String, Object> imageMap = new Map<String, Object>();
+                                imageMap.put('src', obj.get(docMapping.Token_Value__c));
+                                imageMap.put('width', 450);
+                                tokenDataMap.put(docMapping.Document_Token__c, imageMap);
+                            }else if(docMapping.Data_Type__c == 'Text_Transform'){
+                                tokenDataMap.put(docMapping.Document_Token__c, transformText(docMapping, obj));
+                            }else if(docMapping.Data_Type__c == 'Boolean'){
+                                tokenDataMap.put(docMapping.Document_Token__c, transformBoolean(docMapping, obj));
+                            }else if(docMapping.Data_Type__c == 'Picklist'){
+                                tokenDataMap.put(docMapping.Document_Token__c, transformPicklist(docMapping, obj,objectAPIName));
+                            }else if(docMapping.Data_Type__c == 'Date'){
+                                tokenDataMap.put(docMapping.Document_Token__c, formatDate((Date)obj.get(docMapping.Token_Value__c)));
+                            }else if(docMapping.Data_Type__c == 'Time'){
+                                tokenDataMap.put(docMapping.Document_Token__c, formatTime((Time)obj.get(docMapping.Token_Value__c)));
+                            }else{
+                                tokenDataMap.put(docMapping.Document_Token__c, obj.get(docMapping.Token_Value__c));
+                            }
+                        }
+                    }else{
+                        //Is_Parent_Object_Mapping = true for account record
+                        if(docMapping.Data_Type__c == 'Date'){
+                            tokenDataMap.put(docMapping.Document_Token__c, formatDate((Date)parentAccountObj.get(docMapping.Token_Value__c)));
+                        }else{
+                            tokenDataMap.put(docMapping.Document_Token__c, parentAccountObj.get(docMapping.Token_Value__c));
+                        }
+                    }
+                    
+                }
+                
+            }
+    
+            String tokenData = JSON.serialize(tokenDataMap);
+            DocumentGenerationProcess docGenRequest = new DocumentGenerationProcess();
+            docGenRequest.Type = 'GenerateAndConvert'; // Generates Word and PDF
+            docGenRequest.RequestText = requestData;
+            docGenRequest.ReferenceObject = sObjectId; // e.g., Account or Patient ID
+            docGenRequest.TokenData = tokenData;
+            docGenRequest.DocGenApiVersionType = 'Advanced'; // Enables rich text and hyperlinks
+            docGenRequest.DocumentTemplateId = docTemplate.Id; // Template ID
+            if(!Test.isRunningTest()){
+                insert docGenRequest;
+                System.debug('============docGenRequest'+docGenRequest.Id);
+            }
+            
+        }
+        
+        
+    }
+    
+    
+    public static string queryAllFields(String objectName, Id sobjectId, String childObjRelFieldName) {
+        // Get the describe result for the object
+        
+        Schema.SObjectType objType = Schema.getGlobalDescribe().get(objectName);
+        Schema.DescribeSObjectResult describeResult = objType.getDescribe();
+        
+        // Get all fields
+        Map<String, Schema.SObjectField> fieldsMap = describeResult.fields.getMap();
+        List<String> fieldNames = new List<String>();
+        
+        for (String fieldName : fieldsMap.keySet()) {
+            fieldNames.add(fieldName);
+        }
+        
+        // Build the SOQL query
+        String soql = '';
+        if(childObjRelFieldName == ''){
+            fieldNames.add('Related_Account__r.Name');
+            fieldNames.add('Related_Account__r.Date_of_Birth__c');
+            fieldNames.add('Related_Account__r.PersonGenderIdentity');
+            fieldNames.add('Related_Account__r.PersonMobilePhone');
+            fieldNames.add('Related_Account__r.mecwacare_Client_ID__c');
+            fieldNames.add('Related_Account__r.Phone');
+            fieldNames.add('Related_Account__r.maica_cc__NDIS_Number__pc');
+            fieldNames.add('Related_Account__r.Medicare_Number__c');
+            fieldNames.add('Related_Account__r.Primary_Language__c');
+            fieldNames.add('Related_Account__r.PersonContactId');
+            fieldNames.add('Related_Account__r.LastName');
+            fieldNames.add('Related_Account__r.FirstName');
+            //fieldNames.add('Account_Name__r.mecwacare_Client_ID__c');
+            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE Id = :sobjectId ';
+        }else{
+            String andCondition = '';
+            if(objectName == 'Medical_Conditions__c'){
+                andCondition = ' AND RecordType.DeveloperName = \'Allergy_Intolerance\'';
+            }
+            
+            soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName +  ' WHERE ' + childObjRelFieldName + ' = \'' + sobjectId + '\'' + andCondition;
+        }
+        system.debug('======soql==========='+soql);
+        return soql;
+        
+    }
+    //Date Format
+    public static String formatDate(Date inputDate) {
+        if (inputDate == null) return '';
+        
+        Datetime dt = Datetime.newInstance(inputDate.year(), inputDate.month(), inputDate.day(), 0, 0, 0);
+        
+        return dt.format('dd/MM/yyyy');
+    }
+    
+    //Time Format
+    public static String formatTime(Time inputTime) {
+        if (inputTime == null) return '';
+        Date today = Date.today();
+        Datetime dt = Datetime.newInstance(today, inputTime);
+        
+        // Format to 12-hour time with AM/PM
+        return dt.format('hh:mm a');
+    }
+    
+    // Date&Time Format
+    public static String formatDateTime(Datetime inputDateTime) {
+        if (inputDateTime == null) return '';
+        // Format as dd/MM/yyyy hh:mm a
+        String formattedDate = inputDateTime.format('dd/MM/yyyy hh:mm a');
+        return formattedDate;
+        
+    }
+    
+    //Transform Text
+    public static string transformText(Document_Mappings__c docMapping, Sobject obj){
+        String outputString = '';
+        String documentTokenString = docMapping.Document_Token__c.split('_')[1]; //Yes, No, Safe, Unsafe, All of the above, 
+        //if(docMapping.Document_Token__c.endsWith('YES')){
+        if(obj.get(docMapping.Token_Value__c) != null){
+            if(obj.get(docMapping.Token_Value__c) == documentTokenString){
+                if(documentTokenString == 'No'){
+                    outputString = 'No';
+                }else if(documentTokenString == 'Safe'){
+                    outputString = 'Safe';
+                } else if(documentTokenString == 'Unsafe'){
+                    outputString = 'Unsafe';
+                }else{
+                    outputString = 'Yes';
+                }
+            }
+        }
+        
+        return outputString;
+    }
+    //Format Boolean to Yes/No
+    public static string transformBoolean(Document_Mappings__c docMapping, Sobject obj){
+        String outputString = '';
+        if(docMapping.Document_Token__c.endsWith('YES')){   
+            if(obj.get(docMapping.Token_Value__c) == true){
+                outputString = 'Yes';
+                
+            }
+        }else if(docMapping.Document_Token__c.endsWith('NO')){
+            if(obj.get(docMapping.Token_Value__c) == false){
+                outputString = 'No';
+                
+            }
+        }
+        return outputString;
+        
+    }
+    //Chlid Format Boolean to Yes/No
+    public static string transformBooleanChild(Document_Mappings__c docChildMapping, Sobject chilSobj){
+        String outputString = '';
+        if(docChildMapping.Document_Token__c.endsWith('YES')){   
+            if(chilSobj.get(docChildMapping.Token_Value__c) == true){
+                outputString = 'Yes';
+                
+            }
+        }else if(docChildMapping.Document_Token__c.endsWith('NO')){
+            if(chilSobj.get(docChildMapping.Token_Value__c) == false){
+                outputString = 'No';
+                
+            }
+        }
+        return outputString;
+        
+    }
+    //Transform API Name to field Label for Picklist values
+    
+    public static string transformPicklist(Document_Mappings__c docMapping, Sobject obj, String objectAPIName){
+        string label = '';
+        if(obj.get(docMapping.Token_Value__c) != null){
+            String picklistValue = (String)obj.get(docMapping.Token_Value__c);
+            //String objectName = docMapping.Object_API_Name__c;
+            String fieldApiName = docMapping.Token_Value__c;
+            Schema.SObjectType objType = Schema.getGlobalDescribe().get(objectAPIName);
+            Schema.DescribeSObjectResult objDescribe = objType.getDescribe();
+            Schema.DescribeFieldResult fieldDescribe = objDescribe.fields.getMap().get(fieldApiName).getDescribe();
+            
+            
+            for (Schema.PicklistEntry entry : fieldDescribe.getPicklistValues()) {
+                if (entry.getValue() == picklistValue) {
+                    label = entry.getLabel();
+                    break;
+                }
+            }
+            
+        }
+        return label;
+        
+    }
+    
+    public static Map<String, String> getObjectApiWithRelField(){
+        Map<String, String> objRelFieldApiMap = new Map<String, String>();
+        objRelFieldApiMap.put('GDCP_Goal__c','Goal_Directed_Care_Plan_Fom__c');
+        objRelFieldApiMap.put('GDCP_Action__c','Goal_Directed_Care_Plan_Fom__c');
+        objRelFieldApiMap.put('Medical_Conditions__c','Account__c');
+        objRelFieldApiMap.put('Pulse__c','General_Observation_Record__c');
+        objRelFieldApiMap.put('Other_General_Observation__c','General_Observation_Record__c');
+        return objRelFieldApiMap;
+    }
+    public static List<Map<String, Object>> buildChildSobjectList(List<SObject> childRecords,List<Document_Mappings__c> documentMappingsList, String childSobjName) {
+        List<Map<String, Object>> childSobjectList = new List<Map<String, Object>>();
+        System.debug('childRecords==========>'+childRecords);
+        System.debug('documentMappingsList==========>'+documentMappingsList);
+        for (SObject chilSobj : childRecords) {
+                    Map<String, Object> childObjMap = new Map<String, Object>();
+                    
+                    for (Document_Mappings__c docChildMapping : documentMappingsList) {
+                        if (docChildMapping.Is_Child_Object_Mapping__c && docChildMapping.Child_Object_APiName__c == childSobjName) {
+                            String token = docChildMapping.Document_Token__c;
+                            //System.debug('token=============='+token);
+                            String fieldName = docChildMapping.Token_Value__c;
+                            //System.debug('fieldName'+fieldName); 
+                            if (docChildMapping.Data_Type__c == 'Time') {
+                                childObjMap.put(token, formatTime((Time)chilSobj.get(fieldName)));
+                            } else if (docChildMapping.Data_Type__c == 'Date') {
+                                childObjMap.put(token, formatDate((Date)chilSobj.get(fieldName)));
+                            } else if (docChildMapping.Data_Type__c == 'Boolean') {
+                                childObjMap.put(token, transformBooleanChild(docChildMapping, chilSobj));
+                            }else if (docChildMapping.Data_Type__c == 'Date/Time') {
+                                childObjMap.put(token, formatDateTime((Datetime)chilSobj.get(fieldName)));
+                            }
+                            else {
+                                childObjMap.put(token, chilSobj.get(fieldName));
+                            }
+                        }
+                    }
+                    
+                    childSobjectList.add(childObjMap);
+                }
+        return childSobjectList;
+        
+    } 
+    
+}
