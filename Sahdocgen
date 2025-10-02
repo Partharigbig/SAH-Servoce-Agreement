@@ -7,24 +7,38 @@
  *   Children: From Account -> CCR (ContactContactRelation, PoA only)
  *             From Funding -> Funding Items (maica_cc__Funding_Item__c)
  *
- * Tokens created:
- *   Opportunity.* , Account.* ,
- *   Funding.* , FundingItemList[] ,
- *   CCRList[] ,
- *   showPartG_AT_HM, showPartH_Restorative, showPartI_EndOfLife
+ * Dynamic template resolution by Environment Variable *names* (Custom Metadata DeveloperName):
+ *  - envContentDocVarName   -> Environment_Variables__mdt.Value__c = ContentDocumentId (of your DOCX)
+ *  - envTemplateNameVarName -> Environment_Variables__mdt.Value__c = DocumentTemplate.Name
+ *
+ * Flow inputs:
+ *   - recordIds[0]  (Opportunity Id)  [REQUIRED]
+ *   - envContentDocVarName            [RECOMMENDED]
+ *   - envTemplateNameVarName          [RECOMMENDED]
+ *   - (Optional overrides) docTemplateName, templateContentVersionId
+ *
+ * Notes:
+ *   - Uses ONLY Account.Home_Address__c* and RelatedContact.Home_Address__c* (no mailing/billing).
+ *   - Funding type field is Funding_Type__c (no namespace).
+ *   - Funding Item adds range-based FundingTier + currency display fields.
+ *   - Section flags (showPartG/H/I) driven by Funding Item Budget Type.
  ******************************************************************************************/
 public without sharing class MC_SAHOpportunityDocGen_Direct {
 
     public class Wrapper {
         @InvocableVariable(required=true)
         public List<Id> recordIds;                 // Opportunity Id(s) – first used
-        @InvocableVariable(required=true)
-        public String docTemplateName;             // DocumentTemplate.Name
-        @InvocableVariable(required=true)
-        public String templateContentVersionId;    // ContentVersion.Id
+
+        // Optional direct overrides (take precedence if provided)
+        @InvocableVariable public String docTemplateName;             // DocumentTemplate.Name
+        @InvocableVariable public String templateContentVersionId;    // ContentVersion.Id
+
+        // Preferred: dynamic by ENV variable *names* (DeveloperName of Environment_Variables__mdt)
+        @InvocableVariable public String envContentDocVarName;        // Value__c = ContentDocumentId
+        @InvocableVariable public String envTemplateNameVarName;      // Value__c = DocumentTemplate.Name
     }
 
-    @InvocableMethod(label='Generate SAH Agreement (Direct)')
+    @InvocableMethod(label='Generate SAH Agreement (Direct, Dynamic via Env Vars)')
     public static void generateFromFlow(List<Wrapper> inputs) {
         if (inputs == null || inputs.isEmpty() || inputs[0].recordIds == null || inputs[0].recordIds.isEmpty()) {
             throw new AuraHandledException('No Opportunity Id provided.');
@@ -35,7 +49,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
     private static void process(Wrapper w) {
         Id oppId = w.recordIds[0];
 
-        // --- Opportunity (explicit fields; add more if you need them in the doc)
+        // --- Opportunity
         Opportunity opp = [
             SELECT Id, Name, StageName, CloseDate, Amount,
                    AccountId, Funding__c, Funding_Source__c
@@ -43,26 +57,23 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             WHERE Id = :oppId
             LIMIT 1
         ];
-
-        // Only generate for Support at Home
         if (opp.Funding_Source__c != 'Support at Home') return;
 
-        // --- Parent #1: Account
+        // --- Parent: Account (ONLY custom Home_Address__c compound)
         Account acc = null;
         if (opp.AccountId != null) {
             acc = [
                 SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
-                       BillingStreet, BillingCity, BillingState, BillingPostalCode,
-                       PersonContactId, FirstName, LastName, Date_of_Birth__c
+                       FirstName, LastName, Date_of_Birth__c, PersonContactId,
+                       Home_Address__cStreet, Home_Address__cCity, Home_Address__cState,
+                       Home_Address__cPostalCode, Home_Address__cCountry
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
             ];
         }
 
-        // --- Parent #2: Funding (via Opportunity.Funding__c)
-        // NOTE: Field APIs like Start/End/Type may be different in your org.
-        // Adjust below if needed.
+        // --- Parent: Funding (via Opportunity.Funding__c)
         maica_cc__Funding__c funding = null;
         if (opp.Funding__c != null) {
             funding = [
@@ -94,15 +105,16 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             ];
         }
 
-        // --- Child of Account: CCR (PoA only) via PersonContact
+        // --- Child of Account: CCR (PoA only) via PersonContact (ONLY RelatedContact.Home_Address__c compound)
         List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
         if (acc != null && acc.PersonContactId != null) {
             ccrList = [
                 SELECT Id, ContactId, RelatedContactId,
                        Power_of_Attorney__c, Relationship__c, Next_of_Kin__c,
                        RelatedContact.Name, RelatedContact.Phone, RelatedContact.Email,
-                       RelatedContact.MailingStreet, RelatedContact.MailingCity,
-                       RelatedContact.MailingState, RelatedContact.MailingPostalCode
+                       RelatedContact.Home_Address__cStreet, RelatedContact.Home_Address__cCity,
+                       RelatedContact.Home_Address__cState, RelatedContact.Home_Address__cPostalCode,
+                       RelatedContact.Home_Address__cCountry
                 FROM ContactContactRelation
                 WHERE ContactId = :acc.PersonContactId
                   AND Power_of_Attorney__c != null
@@ -132,7 +144,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
 
-        // Account tokens
+        // Account tokens (Home Address only)
         if (acc != null) {
             token.put('AccountName', acc.Name);
             token.put('AccountFirstName', acc.FirstName);
@@ -141,7 +153,12 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('AccountPhone', acc.Phone);
             token.put('AccountMobile', acc.PersonMobilePhone);
             token.put('AccountEmail', acc.PersonEmail);
-            token.put('AccountBillingAddress', formatAddress(acc.BillingStreet, acc.BillingCity, acc.BillingState, acc.BillingPostalCode));
+            token.put('AccountHomeAddress',
+                      formatAddress(acc.Home_Address__cStreet,
+                                    acc.Home_Address__cCity,
+                                    acc.Home_Address__cState,
+                                    acc.Home_Address__cPostalCode,
+                                    acc.Home_Address__cCountry));
         }
 
         // Funding tokens (single parent)
@@ -149,10 +166,10 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('FundingName', funding.Name);
             token.put('FundingStartDate', formatDate(funding.maica_cc__Start_Date__c));
             token.put('FundingEndDate',   formatDate(funding.maica_cc__End_Date__c));
-            token.put('FundingType',      funding.Funding_Type__c); // per your note: no namespace on field
+            token.put('FundingType',      funding.Funding_Type__c);
         }
 
-        // CCR list tokens
+        // CCR list (Home Address only)
         List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
@@ -161,12 +178,14 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             row.put('RelatedContactName',   ccr.RelatedContact != null ? ccr.RelatedContact.Name  : null);
             row.put('RelatedContactPhone',  ccr.RelatedContact != null ? ccr.RelatedContact.Phone : null);
             row.put('RelatedContactEmail',  ccr.RelatedContact != null ? ccr.RelatedContact.Email : null);
-            row.put('RelatedContactAddress', formatAddress(
-                ccr.RelatedContact != null ? ccr.RelatedContact.MailingStreet : null,
-                ccr.RelatedContact != null ? ccr.RelatedContact.MailingCity   : null,
-                ccr.RelatedContact != null ? ccr.RelatedContact.MailingState  : null,
-                ccr.RelatedContact != null ? ccr.RelatedContact.MailingPostalCode : null
-            ));
+            row.put('RelatedContactAddress',
+                    ccr.RelatedContact != null
+                    ? formatAddress(ccr.RelatedContact.Home_Address__cStreet,
+                                    ccr.RelatedContact.Home_Address__cCity,
+                                    ccr.RelatedContact.Home_Address__cState,
+                                    ccr.RelatedContact.Home_Address__cPostalCode,
+                                    ccr.RelatedContact.Home_Address__cCountry)
+                    : null);
             row.put('PowerOfAttorney', ccr.Power_of_Attorney__c);
             row.put('Relationship',    ccr.Relationship__c);
             row.put('IsNextOfKin',     ccr.Next_of_Kin__c);
@@ -175,7 +194,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         }
         token.put('CCRList', ccrOut);
 
-        // Funding Item list tokens (+ slab + display)
+        // Funding Items list (+ slab + display)
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             Map<String,Object> row = new Map<String,Object>();
@@ -207,17 +226,56 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         token.put('showPartH_Restorative', showPartH_Restorative);
         token.put('showPartI_EndOfLife', showPartI_EndOfLife);
 
-        // --- Generate
+        /***** DYNAMIC TEMPLATE RESOLUTION BY ENV VAR NAMES *****/
+        String templateName = w.docTemplateName;
+        String contentVersionId = w.templateContentVersionId;
+
+        // If Flow provided ENV variable *names*, read their values from CMDT
+        Set<String> envKeys = new Set<String>();
+        if (!String.isBlank(w.envContentDocVarName))    envKeys.add(w.envContentDocVarName);
+        if (!String.isBlank(w.envTemplateNameVarName))  envKeys.add(w.envTemplateNameVarName);
+
+        Map<String,String> envMap = envKeys.isEmpty() ? new Map<String,String>() : getEnvValuesByNames(envKeys);
+
+        // Resolve ContentVersionId from ContentDocumentId (stored in ENV var)
+        if (String.isBlank(contentVersionId) && !String.isBlank(w.envContentDocVarName)) {
+            String contentDocumentIdStr = envMap.get(w.envContentDocVarName);
+            if (!String.isBlank(contentDocumentIdStr)) {
+                Id contentDocumentId = (Id)contentDocumentIdStr;
+                ContentVersion cv = [
+                    SELECT Id
+                    FROM ContentVersion
+                    WHERE ContentDocumentId = :contentDocumentId
+                    ORDER BY VersionNumber DESC
+                    LIMIT 1
+                ];
+                contentVersionId = cv.Id;
+            }
+        }
+
+        // Resolve DocumentTemplate.Name from ENV var if not provided
+        if (String.isBlank(templateName) && !String.isBlank(w.envTemplateNameVarName)) {
+            templateName = envMap.get(w.envTemplateNameVarName);
+        }
+
+        if (String.isBlank(templateName)) {
+            throw new AuraHandledException('Document template name could not be resolved. Provide docTemplateName or envTemplateNameVarName.');
+        }
+        if (String.isBlank(contentVersionId)) {
+            throw new AuraHandledException('Template ContentVersionId could not be resolved. Provide templateContentVersionId or envContentDocVarName.');
+        }
+
+        // Use template name (string) to find active DocumentTemplate
         DocumentTemplate tmpl = [
             SELECT Id, Name
             FROM DocumentTemplate
-            WHERE Name = :w.docTemplateName AND IsActive = true
+            WHERE Name = :templateName AND IsActive = true
             LIMIT 1
         ];
 
         Map<String, Object> req = new Map<String, Object>{
-            'templateContentVersionId' => w.templateContentVersionId,
-            'title'                    => w.docTemplateName + '_' + (acc != null ? acc.Name : opp.Name),
+            'templateContentVersionId' => contentVersionId,
+            'title'                    => templateName + '_' + (acc != null ? acc.Name : opp.Name),
             'keepIntermediate'         => false
         };
 
@@ -232,7 +290,21 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         if (!Test.isRunningTest()) insert dgp;
     }
 
-    // ===== Helpers =====
+    /* ================= Helpers ================= */
+
+    /** Read Environment_Variables__mdt by DeveloperName and return map<DeveloperName, Value__c> */
+    private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
+        Map<String,String> out = new Map<String,String>();
+        if (developerNames == null || developerNames.isEmpty()) return out;
+        for (Environment_Variables__mdt ev :
+             [SELECT DeveloperName, Value__c
+              FROM Environment_Variables__mdt
+              WHERE DeveloperName IN :developerNames]) {
+            out.put(ev.DeveloperName, ev.Value__c);
+        }
+        return out;
+    }
+
     private static String formatDate(Date d) {
         if (d == null) return '';
         return Datetime.newInstance(d.year(), d.month(), d.day(), 0, 0, 0).format('dd/MM/yyyy');
@@ -241,12 +313,13 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         if (v == null) return '';
         return '$' + String.valueOf(v.setScale(2));
     }
-    private static String formatAddress(String st, String city, String state, String pcode) {
+    private static String formatAddress(String street, String city, String state, String pcode, String country) {
         List<String> parts = new List<String>();
-        if (!String.isBlank(st)) parts.add(st);
-        if (!String.isBlank(city)) parts.add(city);
-        if (!String.isBlank(state)) parts.add(state);
-        if (!String.isBlank(pcode)) parts.add(pcode);
+        if (!String.isBlank(street))  parts.add(street);
+        if (!String.isBlank(city))    parts.add(city);
+        if (!String.isBlank(state))   parts.add(state);
+        if (!String.isBlank(pcode))   parts.add(pcode);
+        if (!String.isBlank(country)) parts.add(country);
         return String.join(parts, ', ');
     }
     private static String classifyTier(Decimal amt) {
