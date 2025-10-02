@@ -1,12 +1,16 @@
 /******************************************************************************************
  * MC_SAHOpportunityDocGen_Direct
- * Support at Home Agreement – Direct Field Mapping (no Document_Mappings__c)
+ * Support at Home Agreement – Direct Field Mapping (NO Document_Mappings__c)
  *
- * Tokens produced (top-level keys):
+ * Model (from Opportunity):
+ *   Parents:  Account (Opportunity.AccountId), Funding (Opportunity.Funding__c)
+ *   Children: From Account -> CCR (ContactContactRelation, PoA only)
+ *             From Funding -> Funding Items (maica_cc__Funding_Item__c)
+ *
+ * Tokens created:
  *   Opportunity.* , Account.* ,
- *   CCRList[] (RelatedContact & CCR fields),
- *   FundingList[] ,
- *   FundingItemList[] (with FundingTier and currency display fields),
+ *   Funding.* , FundingItemList[] ,
+ *   CCRList[] ,
  *   showPartG_AT_HM, showPartH_Restorative, showPartI_EndOfLife
  ******************************************************************************************/
 public without sharing class MC_SAHOpportunityDocGen_Direct {
@@ -31,18 +35,19 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
     private static void process(Wrapper w) {
         Id oppId = w.recordIds[0];
 
-        // --- Opportunity (explicit fields)
+        // --- Opportunity (explicit fields; add more if you need them in the doc)
         Opportunity opp = [
-            SELECT Id, Name, StageName, CloseDate, Amount, AccountId, Funding_Source__c
+            SELECT Id, Name, StageName, CloseDate, Amount,
+                   AccountId, Funding__c, Funding_Source__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
         ];
 
-        // Gate: only for Support at Home
+        // Only generate for Support at Home
         if (opp.Funding_Source__c != 'Support at Home') return;
 
-        // --- Account (parent)
+        // --- Parent #1: Account
         Account acc = null;
         if (opp.AccountId != null) {
             acc = [
@@ -55,19 +60,25 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             ];
         }
 
-        // --- Funding (child of Opportunity)
-        List<maica_cc__Funding__c> fundingList = [
-            SELECT Id, Name, maica_cc__Start_Date__c, maica_cc__End_Date__c, maica_cc__Funding_Type__c
-            FROM maica_cc__Funding__c
-            WHERE maica_cc__Opportunity__c = :opp.Id
-        ];
+        // --- Parent #2: Funding (via Opportunity.Funding__c)
+        // NOTE: Field APIs like Start/End/Type may be different in your org.
+        // Adjust below if needed.
+        maica_cc__Funding__c funding = null;
+        if (opp.Funding__c != null) {
+            funding = [
+                SELECT Id, Name,
+                       maica_cc__Start_Date__c,
+                       maica_cc__End_Date__c,
+                       Funding_Type__c
+                FROM maica_cc__Funding__c
+                WHERE Id = :opp.Funding__c
+                LIMIT 1
+            ];
+        }
 
-        // --- Funding Items (unrelated from Opp PoV: by Funding IN …)
+        // --- Child of Funding: Funding Items
         List<maica_cc__Funding_Item__c> fundingItemList = new List<maica_cc__Funding_Item__c>();
-        if (!fundingList.isEmpty()) {
-            Set<Id> fundingIds = new Set<Id>();
-            for (maica_cc__Funding__c f : fundingList) fundingIds.add(f.Id);
-
+        if (funding != null) {
             fundingItemList = [
                 SELECT Id, Name,
                        maica_cc__Budget_Type__c,
@@ -79,16 +90,16 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
                        maica_cc__End_Date__c,
                        maica_cc__Funding__c
                 FROM maica_cc__Funding_Item__c
-                WHERE maica_cc__Funding__c IN :fundingIds
+                WHERE maica_cc__Funding__c = :funding.Id
             ];
         }
 
-        // --- CCR (unrelated from Opp PoV: Account → PersonContact → CCR), only with PoA
+        // --- Child of Account: CCR (PoA only) via PersonContact
         List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
         if (acc != null && acc.PersonContactId != null) {
             ccrList = [
                 SELECT Id, ContactId, RelatedContactId,
-                       Power_of_Attorney__c, Relationship__c, PartyRoleRelationship__c, Next_of_Kin__c,
+                       Power_of_Attorney__c, Relationship__c, Next_of_Kin__c,
                        RelatedContact.Name, RelatedContact.Phone, RelatedContact.Email,
                        RelatedContact.MailingStreet, RelatedContact.MailingCity,
                        RelatedContact.MailingState, RelatedContact.MailingPostalCode
@@ -98,11 +109,10 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             ];
         }
 
-        // --- Section flags by Funding Item Budget Type
+        // --- Section flags (from Funding Items' Budget Type)
         Boolean showPartG_AT_HM = false;
         Boolean showPartH_Restorative = false;
         Boolean showPartI_EndOfLife = false;
-
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             String bt = fi.maica_cc__Budget_Type__c;
             if (bt == null) continue;
@@ -112,7 +122,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // --- Build tokens (DIRECT mapping)
+        // --- Token map (DIRECT)
         Map<String, Object> token = new Map<String, Object>();
 
         // Opportunity tokens
@@ -134,7 +144,15 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('AccountBillingAddress', formatAddress(acc.BillingStreet, acc.BillingCity, acc.BillingState, acc.BillingPostalCode));
         }
 
-        // CCR tokens (list)
+        // Funding tokens (single parent)
+        if (funding != null) {
+            token.put('FundingName', funding.Name);
+            token.put('FundingStartDate', formatDate(funding.maica_cc__Start_Date__c));
+            token.put('FundingEndDate',   formatDate(funding.maica_cc__End_Date__c));
+            token.put('FundingType',      funding.Funding_Type__c); // per your note: no namespace on field
+        }
+
+        // CCR list tokens
         List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
@@ -150,34 +168,21 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
                 ccr.RelatedContact != null ? ccr.RelatedContact.MailingPostalCode : null
             ));
             row.put('PowerOfAttorney', ccr.Power_of_Attorney__c);
-            row.put('Relationship', ccr.Relationship__c);
-            row.put('PartyRoleRelationship', ccr.PartyRoleRelationship__c);
-            row.put('IsNextOfKin', ccr.Next_of_Kin__c);
-            row.put('RowNumber', cIdx);
+            row.put('Relationship',    ccr.Relationship__c);
+            row.put('IsNextOfKin',     ccr.Next_of_Kin__c);
+            row.put('RowNumber',       cIdx);
             ccrOut.add(row);
         }
         token.put('CCRList', ccrOut);
 
-        // Funding tokens (list)
-        List<Map<String,Object>> fundingOut = new List<Map<String,Object>>();
-        for (maica_cc__Funding__c f : fundingList) {
-            Map<String,Object> row = new Map<String,Object>();
-            row.put('FundingName', f.Name);
-            row.put('FundingStartDate', formatDate(f.maica_cc__Start_Date__c));
-            row.put('FundingEndDate',   formatDate(f.maica_cc__End_Date__c));
-            row.put('FundingType',      f.maica_cc__Funding_Type__c);
-            fundingOut.add(row);
-        }
-        token.put('FundingList', fundingOut);
-
-        // Funding Item tokens (list) with range slabs + display fields
+        // Funding Item list tokens (+ slab + display)
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             Map<String,Object> row = new Map<String,Object>();
             row.put('FundingItemName', fi.Name);
             row.put('BudgetType', fi.maica_cc__Budget_Type__c);
 
-            // raw values
+            // raw
             row.put('ApprovedAmount',  fi.maica_cc__Approved_Amount__c);
             row.put('SpentAmount',     fi.maica_cc__Spent_Amount__c);
             row.put('RemainingAmount', fi.maica_cc__Remaining_Amount__c);
@@ -185,12 +190,12 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             row.put('EffectiveDate',   formatDate(fi.maica_cc__Effective_Date__c));
             row.put('EndDate',         formatDate(fi.maica_cc__End_Date__c));
 
-            // display (currency)
+            // display
             row.put('Approved_Amount_Display',   formatCurrency(fi.maica_cc__Approved_Amount__c));
             row.put('Spent_Amount_Display',      formatCurrency(fi.maica_cc__Spent_Amount__c));
             row.put('Remaining_Amount_Display',  formatCurrency(fi.maica_cc__Remaining_Amount__c));
 
-            // tier (range-based)
+            // tier by range
             row.put('FundingTier', classifyTier(fi.maica_cc__Approved_Amount__c));
 
             fiOut.add(row);
@@ -202,7 +207,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         token.put('showPartH_Restorative', showPartH_Restorative);
         token.put('showPartI_EndOfLife', showPartI_EndOfLife);
 
-        // --- Create document
+        // --- Generate
         DocumentTemplate tmpl = [
             SELECT Id, Name
             FROM DocumentTemplate
