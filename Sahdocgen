@@ -3,9 +3,8 @@
  * Generate Support at Home Agreement Document from Opportunity
  *
  * Flow-invocable
- * Entry: Opportunity
  * Data Path: Opportunity → Account → ContactContactRelation → Funding → Funding Item
- * Document mappings are handled via Document_Mappings__c
+ * Uses Document_Mappings__c for token substitution.
  ******************************************************************************************/
 public without sharing class MC_SAHOpportunityDocGen {
 
@@ -68,13 +67,23 @@ public without sharing class MC_SAHOpportunityDocGen {
         String fundingSoql = queryAllFields('maica_cc__Funding__c', oppId, 'maica_cc__Opportunity__c');
         List<SObject> fundingList = Database.query(fundingSoql);
 
-        // --- Query Funding Items (child of Funding)
+        // --- Query Funding Items (child of Funding) using IN clause
         List<SObject> fundingItemList = new List<SObject>();
         if (!fundingList.isEmpty()) {
             Set<Id> fundingIds = new Set<Id>();
             for (SObject f : fundingList) fundingIds.add(f.Id);
-            String fiSoql = queryAllFields('maica_cc__Funding_Item__c', null, 'maica_cc__Funding__c');
-            fiSoql += ' AND maica_cc__Funding__c IN :fundingIds';
+
+            // build dynamic field list for Funding Item
+            Schema.SObjectType fiType = Schema.getGlobalDescribe().get('maica_cc__Funding_Item__c');
+            Map<String, Schema.SObjectField> fiFields = fiType.getDescribe().fields.getMap();
+            List<String> fiFieldNames = new List<String>();
+            for (String fn : fiFields.keySet()) fiFieldNames.add(fn);
+
+            String fiSoql =
+                'SELECT ' + String.join(fiFieldNames, ',') +
+                ' FROM maica_cc__Funding_Item__c' +
+                ' WHERE maica_cc__Funding__c IN :fundingIds';
+
             fundingItemList = Database.query(fiSoql);
         }
 
@@ -105,7 +114,7 @@ public without sharing class MC_SAHOpportunityDocGen {
         List<Document_Mappings__c> mappings = [
             SELECT Id, Document_Token__c, Token_Value__c, Document_Name__c,
                    Data_Type__c, Is_Child_Object_Mapping__c, Is_Parent_Object_Mapping__c,
-                   Is_Unrelated_Object_Mapping__c, Child_Object_APIName__c
+                   Is_Unrelated_Object_Mapping__c, Child_Object_APiName__c
               FROM Document_Mappings__c
              WHERE Document_Name__c = :w.docTemplateName
         ];
