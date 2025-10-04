@@ -1,29 +1,10 @@
-/******************************************************************************************
- * MC_SAHOpportunityDocGen_Direct
- * Support at Home Agreement – Direct Field Mapping  (SAFE / Shipping Address version)
- *
- * Model (from Opportunity):
- *   Parents:  Account (Opportunity.AccountId), Funding (Opportunity.Funding__c)
- *   Children: From Account -> CCR (ContactContactRelation, PoA only)
- *             From Funding -> Funding Items (maica_cc__Funding_Item__c)
- *
- * Dynamic template resolution by Environment Variable *names* (Custom Metadata DeveloperName):
- *  - envContentDocVarName   -> Environment_Variables__mdt.Value__c = ContentDocumentId (of your DOCX)
- *  - envTemplateNameVarName -> Environment_Variables__mdt.Value__c = DocumentTemplate.Name
- *
- * Flow inputs:
- *   - recordIds[0]  (Opportunity Id)  [REQUIRED]
- *   - envContentDocVarName            [RECOMMENDED]
- *   - envTemplateNameVarName          [RECOMMENDED]
- *   - (Optional overrides) docTemplateName, templateContentVersionId
- ******************************************************************************************/
 public without sharing class MC_SAHOpportunityDocGen_Direct {
 
     public class Wrapper {
         @InvocableVariable(required=true)
         public List<Id> recordIds;                 // Opportunity Id(s) – first used
 
-        // Optional direct overrides (take precedence if provided)
+        // Optional direct overrides 
         @InvocableVariable public String docTemplateName;             // DocumentTemplate.Name
         @InvocableVariable public String templateContentVersionId;    // ContentVersion.Id
 
@@ -44,7 +25,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
     private static void process(Wrapper w) {
         Id oppId = w.recordIds[0];
 
-        // --- Opportunity (safe query)
+        // --- Opportunity 
         Opportunity opp = null;
         List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
@@ -58,13 +39,11 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             throw new AuraHandledException('Opportunity not found for Id: ' + String.valueOf(oppId));
         }
 
-        // Business gate as you had
         if (opp.Funding_Source__c != 'Support at Home') {
-            // Quiet exit like your code (or throw if you prefer hard-stop)
             return;
         }
 
-        // --- Parent: Account  (Shipping address instead of custom Home_Address__)
+        // --- Parent: Account  
         Account acc = null;
         if (opp.AccountId != null) {
             List<Account> accRows = [
@@ -142,7 +121,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // --- Token map (kept same structure you had)
+        // --- Token map 
         Map<String, Object> token = new Map<String, Object>();
 
         // Opportunity tokens
@@ -152,7 +131,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
 
-        // Account tokens  (Shipping address)
+        // Account tokens  
         if (acc != null) {
             token.put('AccountName', acc.Name);
             token.put('AccountFirstName', acc.FirstName);
@@ -240,7 +219,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         String templateName     = w.docTemplateName;
         String contentVersionId = w.templateContentVersionId;
 
-        // If Flow provided ENV variable *names*, read their values from CMDT
+        
         Set<String> envKeys = new Set<String>();
         if (!String.isBlank(w.envContentDocVarName))    envKeys.add(w.envContentDocVarName);
         if (!String.isBlank(w.envTemplateNameVarName))  envKeys.add(w.envTemplateNameVarName);
@@ -266,7 +245,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             }
         }
 
-        // Resolve DocumentTemplate.Name from ENV var if not provided
+       
         if (String.isBlank(templateName) && !String.isBlank(w.envTemplateNameVarName)) {
             templateName = envMap.get(w.envTemplateNameVarName);
         }
@@ -278,7 +257,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             throw new AuraHandledException('Template ContentVersionId could not be resolved. Provide templateContentVersionId or envContentDocVarName.');
         }
 
-        // Use template name (string) to find active DocumentTemplate (safe)
+        
         List<DocumentTemplate> tmplRows = [
             SELECT Id, Name
             FROM DocumentTemplate
