@@ -49,7 +49,11 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             List<Account> accRows = [
                 SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
                        FirstName, LastName, Date_of_Birth__c, PersonContactId,
-                       ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry
+                       Home_Address__Street__s,
+    Home_Address__City__s,
+    Home_Address__StateCode__s,
+    Home_Address__PostalCode__s,
+    Home_Address__CountryCode__s
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
@@ -142,12 +146,13 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
             token.put('AccountEmail', acc.PersonEmail);
             token.put('AccountHomeAddress',
                       formatAddress(
-                          acc.ShippingStreet,
-                          acc.ShippingCity,
-                          acc.ShippingState,
-                          acc.ShippingPostalCode,
-                          acc.ShippingCountry
-                      ));
+    acc.Home_Address__Street__s,
+    acc.Home_Address__City__s,
+    acc.Home_Address__StateCode__s,
+    acc.Home_Address__PostalCode__s,
+    acc.Home_Address__CountryCode__s
+)
+);
         }
 
         // Funding tokens
