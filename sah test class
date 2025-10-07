@@ -1,83 +1,148 @@
 @IsTest
-static void generates_ok_withDirectOverrides() {
-    // Account + Person Contact
-    Account a = new Account(
-        RecordTypeId = Schema.SObjectType.Account.getRecordTypeInfosByName().get('Person Account').getRecordTypeId(),
-        LastName = 'Tester',
-        FirstName = 'Pat',
-        PersonEmail = 'pat.tester@example.com',
-        Phone = '0400000000',
-        Home_Address__Street__s = '10 Dickson Road',
-        Home_Address__City__s = 'GOONDI BEND',
-        Home_Address__StateCode__s = 'QLD',
-        Home_Address__PostalCode__s = '4860',
-        Home_Address__CountryCode__s = 'AU'
-    );
-    insert a;
+private class MC_SAHOpportunityDocGen_Direct_Tests {
 
-    // Funding (no Name set)
-    maica_cc__Funding__c f = new maica_cc__Funding__c(
-        maica_cc__Start_Date__c = Date.today(),
-        maica_cc__End_Date__c   = Date.today().addMonths(6),
-        Funding_Type__c         = 'NDIS'
-    );
-    insert f;
+    // ─────────────────────────────────────────────────────────────
+    // ✅ Test: Successful execution with direct overrides
+    // ─────────────────────────────────────────────────────────────
+    @IsTest
+    static void testGenerateFromFlow_Success() {
+        // --- Create Account (Person-like)
+        Account a = new Account(
+            Name = 'Support Home Client',
+            Phone = '0400123456',
+            PersonEmail = 'client@example.com',
+            Date_of_Birth__c = Date.today().addYears(-30),
+            Home_Address__Street__s = '10 Test Lane',
+            Home_Address__City__s = 'Sydney',
+            Home_Address__StateCode__s = 'NSW',
+            Home_Address__PostalCode__s = '2000',
+            Home_Address__CountryCode__s = 'AU'
+        );
+        insert a;
 
-    // Funding Item (no Name set)
-    maica_cc__Funding_Item__c fi = new maica_cc__Funding_Item__c(
-        maica_cc__Funding__c          = f.Id,
-        maica_cc__Budget_Type__c      = 'Assistive technology',
-        maica_cc__Approved_Amount__c  = 1500,
-        maica_cc__Entry_Date__c       = Date.today(),
-        maica_cc__Effective_Date__c   = Date.today(),
-        maica_cc__End_Date__c         = Date.today().addMonths(6)
-    );
-    insert fi;
+        // --- Create Funding (managed package, no Name)
+        maica_cc__Funding__c f = new maica_cc__Funding__c(
+            maica_cc__Start_Date__c = Date.today(),
+            maica_cc__End_Date__c   = Date.today().addMonths(6),
+            Funding_Type__c         = 'NDIS'
+        );
+        insert f;
 
-    // Person’s CCR (PoA only). DO NOT set Relationship__c (often not createable in tests).
-    Contact related = new Contact(LastName='Rep', Phone='0411111111', Email='rep@example.com');
-    insert related;
-    insert new ContactContactRelation(
-        ContactId            = a.PersonContactId,
-        RelatedContactId     = related.Id,
-        Power_of_Attorney__c = 'General',     // picklist value that exists in your org
-        Next_of_Kin__c       = false
-    );
+        // --- Create Funding Item (no Name field write)
+        maica_cc__Funding_Item__c fi = new maica_cc__Funding_Item__c(
+            maica_cc__Funding__c          = f.Id,
+            maica_cc__Budget_Type__c      = 'Assistive technology',
+            maica_cc__Approved_Amount__c  = 1200,
+            maica_cc__Entry_Date__c       = Date.today(),
+            maica_cc__Effective_Date__c   = Date.today(),
+            maica_cc__End_Date__c         = Date.today().addMonths(6)
+        );
+        insert fi;
 
-    // A DocumentTemplate and a ContentVersion for the override inputs
-    DocumentTemplate tmpl = new DocumentTemplate(Name = 'SupportAtHomeAgreement_Direct', IsActive = true);
-    insert tmpl;
+        // --- Create related contact for CCR
+        Contact related = new Contact(
+            LastName = 'AuthorisedRep',
+            Phone = '0411222333',
+            Email = 'rep@example.com'
+        );
+        insert related;
 
-    // Fake template file for ContentVersion override
-    ContentVersion cv = new ContentVersion(
-        Title = 'UnitTestTemplate',
-        VersionData = Blob.valueOf('dummy'),
-        PathOnClient = 'UnitTestTemplate.docx'
-    );
-    insert cv;
+        // --- Create CCR (Power_of_Attorney__c = picklist, Next_of_Kin__c = checkbox)
+        insert new ContactContactRelation(
+            ContactId            = a.PersonContactId,
+            RelatedContactId     = related.Id,
+            Power_of_Attorney__c = 'General',    // picklist value existing in org
+            Next_of_Kin__c       = false
+        );
 
-    // Opportunity under test
-    Opportunity opp = new Opportunity(
-        Name = 'Test Opp',
-        StageName = 'Prospecting',
-        CloseDate = Date.today().addDays(10),
-        AccountId = a.Id,
-        Funding__c = f.Id,
-        Funding_Source__c = 'Support at Home'
-    );
-    insert opp;
+        // --- Create Opportunity
+        Opportunity opp = new Opportunity(
+            Name = 'Support Home Opp',
+            StageName = 'Prospecting',
+            CloseDate = Date.today().addDays(10),
+            AccountId = a.Id,
+            Funding__c = f.Id,
+            Funding_Source__c = 'Support at Home'
+        );
+        insert opp;
 
-    // Call the invocable with direct overrides (avoid CMDT in tests)
-    MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-    w.recordIds = new List<Id>{ opp.Id };
-    w.docTemplateName = tmpl.Name;
-    w.templateContentVersionId = cv.Id;
+        // --- Create Document Template
+        DocumentTemplate tmpl = new DocumentTemplate(
+            Name = 'SupportAtHomeAgreement_Direct',
+            IsActive = true
+        );
+        insert tmpl;
 
-    Test.startTest();
-    MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-    Test.stopTest();
+        // --- Create ContentVersion for test
+        ContentVersion cv = new ContentVersion(
+            Title = 'SAH_Template',
+            VersionData = Blob.valueOf('DummyBytes'),
+            PathOnClient = 'SAH_Template.docx'
+        );
+        insert cv;
 
-    // In tests, your class skips inserting DocumentGenerationProcess (guarded by Test.isRunningTest()).
-    // So just assert we got here without exceptions.
-    System.assert(true, 'DocGen executed without throwing.');
+        // Re-query to get Id
+        cv = [SELECT Id FROM ContentVersion WHERE Id = :cv.Id];
+
+        // --- Prepare wrapper input for Apex Invocable
+        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.docTemplateName = tmpl.Name;
+        w.templateContentVersionId = cv.Id;
+
+        // --- Execute
+        Test.startTest();
+        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
+        Test.stopTest();
+
+        // In test mode, insert dgp is skipped — ensure code ran without exceptions
+        System.assert(true, 'GenerateFromFlow executed successfully.');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // ✅ Test: Guard clause when no Opportunity Id provided
+    // ─────────────────────────────────────────────────────────────
+    @IsTest
+    static void testGuard_NoOpportunityId() {
+        Boolean thrown = false;
+        Test.startTest();
+        try {
+            MC_SAHOpportunityDocGen_Direct.generateFromFlow(
+                new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{
+                    new MC_SAHOpportunityDocGen_Direct.Wrapper()
+                }
+            );
+        } catch (AuraHandledException e) {
+            thrown = e.getMessage().contains('No Opportunity Id');
+        }
+        Test.stopTest();
+        System.assert(thrown, 'Expected AuraHandledException when no Opportunity Id provided.');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // ✅ Test: Guard clause when invalid template inputs
+    // ─────────────────────────────────────────────────────────────
+    @IsTest
+    static void testGuard_InvalidTemplate() {
+        // Minimal Account + Opportunity
+        Account a = new Account(Name='TempAcc', Phone='1234');
+        insert a;
+        Opportunity opp = new Opportunity(
+            Name='TempOpp', StageName='Prospecting', CloseDate=Date.today(), AccountId=a.Id, Funding_Source__c='Support at Home'
+        );
+        insert opp;
+
+        // Wrapper with no template name or env var → should throw
+        Boolean thrown = false;
+        Test.startTest();
+        try {
+            MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
+            w.recordIds = new List<Id>{ opp.Id };
+            MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
+        } catch (AuraHandledException e) {
+            thrown = e.getMessage().contains('Document template name could not be resolved');
+        }
+        Test.stopTest();
+        System.assert(thrown, 'Expected AuraHandledException for missing template info.');
+    }
 }
