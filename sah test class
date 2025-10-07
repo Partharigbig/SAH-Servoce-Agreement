@@ -1,109 +1,101 @@
 @IsTest
 private class MC_SAHOpportunityDocGen_Direct_Tests {
 
-    // ─────────────────────────────────────────────────────────────
-    // ✅ Test: Successful execution with direct overrides
-    // ─────────────────────────────────────────────────────────────
-    @IsTest
-    static void testGenerateFromFlow_Success() {
-        // --- Create Account (Person-like)
-        Account a = new Account(
-            Name = 'Support Home Client',
-            Phone = '0400123456',
-            PersonEmail = 'client@example.com',
-            Date_of_Birth__c = Date.today().addYears(-30),
-            Home_Address__Street__s = '10 Test Lane',
-            Home_Address__City__s = 'Sydney',
-            Home_Address__StateCode__s = 'NSW',
-            Home_Address__PostalCode__s = '2000',
-            Home_Address__CountryCode__s = 'AU'
-        );
-        insert a;
+    /* -------------------- Helpers -------------------- */
 
-        // --- Create Funding (managed package, no Name)
+    // Person Account not required for these tests; a simple Account is enough.
+    private static Account makeAccount() {
+        Account a = new Account(
+            Name = 'Acme Test Household'
+        );
+        // If you want to exercise the address formatter:
+        a.Home_Address__Street__s     = '10 Test St';
+        a.Home_Address__City__s       = 'Goondi Bend';
+        a.Home_Address__StateCode__s  = 'QLD';
+        a.Home_Address__PostalCode__s = '4860';
+        a.Home_Address__CountryCode__s= 'AU';
+        insert a;
+        return a;
+    }
+
+    private static maica_cc__Funding__c makeFunding() {
         maica_cc__Funding__c f = new maica_cc__Funding__c(
             maica_cc__Start_Date__c = Date.today(),
-            maica_cc__End_Date__c   = Date.today().addMonths(6),
-            Funding_Type__c         = 'NDIS'
+            maica_cc__End_Date__c   = Date.today().addDays(30),
+            Funding_Type__c         = 'NDIS' // adjust if your org uses a different value
         );
         insert f;
+        return f;
+    }
 
-        // --- Create Funding Item (no Name field write)
+    private static maica_cc__Funding_Item__c makeFundingItem(Id fundingId, Decimal approved) {
         maica_cc__Funding_Item__c fi = new maica_cc__Funding_Item__c(
-            maica_cc__Funding__c          = f.Id,
-            maica_cc__Budget_Type__c      = 'Assistive technology',
-            maica_cc__Approved_Amount__c  = 1200,
+            maica_cc__Funding__c       = fundingId,
+            maica_cc__Budget_Type__c   = 'Assistive technology', // one of the flags
+            maica_cc__Approved_Amount__c  = approved,
+            maica_cc__Spent_Amount__c     = 0,
+            maica_cc__Remaining_Amount__c = approved,
             maica_cc__Entry_Date__c       = Date.today(),
             maica_cc__Effective_Date__c   = Date.today(),
-            maica_cc__End_Date__c         = Date.today().addMonths(6)
+            maica_cc__End_Date__c         = Date.today().addDays(7)
         );
         insert fi;
+        return fi;
+    }
 
-        // --- Create related contact for CCR
-        Contact related = new Contact(
-            LastName = 'AuthorisedRep',
-            Phone = '0411222333',
-            Email = 'rep@example.com'
-        );
-        insert related;
+    // Some orgs require a specific Record Type for Opportunity; this safely picks it if present.
+    private static Id tryGetOppRT(String name) {
+        Map<String, Schema.RecordTypeInfo> m = Schema.SObjectType.Opportunity.getRecordTypeInfosByName();
+        return m.containsKey(name) ? m.get(name).getRecordTypeId() : null;
+    }
 
-        // --- Create CCR (Power_of_Attorney__c = picklist, Next_of_Kin__c = checkbox)
-        insert new ContactContactRelation(
-            ContactId            = a.PersonContactId,
-            RelatedContactId     = related.Id,
-            Power_of_Attorney__c = 'General',    // picklist value existing in org
-            Next_of_Kin__c       = false
-        );
-
-        // --- Create Opportunity
+    private static Opportunity makeOpp(Id accountId, Id fundingId, String fundingSource) {
         Opportunity opp = new Opportunity(
             Name = 'Support Home Opp',
             StageName = 'Prospecting',
             CloseDate = Date.today().addDays(10),
-            AccountId = a.Id,
-            Funding__c = f.Id,
-            Funding_Source__c = 'Support at Home'
+            AccountId = accountId,
+            Funding__c = fundingId,
+            Funding_Source__c = fundingSource,
+            OwnerId = UserInfo.getUserId()
         );
+        Id rt = tryGetOppRT('Support at Home'); // safe if it doesn't exist
+        if (rt != null) opp.RecordTypeId = rt;
         insert opp;
-
-        // --- Create Document Template
-        DocumentTemplate tmpl = new DocumentTemplate(
-            Name = 'SupportAtHomeAgreement_Direct',
-            IsActive = true
-        );
-        insert tmpl;
-
-        // --- Create ContentVersion for test
-        ContentVersion cv = new ContentVersion(
-            Title = 'SAH_Template',
-            VersionData = Blob.valueOf('DummyBytes'),
-            PathOnClient = 'SAH_Template.docx'
-        );
-        insert cv;
-
-        // Re-query to get Id
-        cv = [SELECT Id FROM ContentVersion WHERE Id = :cv.Id];
-
-        // --- Prepare wrapper input for Apex Invocable
-        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-        w.recordIds = new List<Id>{ opp.Id };
-        w.docTemplateName = tmpl.Name;
-        w.templateContentVersionId = cv.Id;
-
-        // --- Execute
-        Test.startTest();
-        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-        Test.stopTest();
-
-        // In test mode, insert dgp is skipped — ensure code ran without exceptions
-        System.assert(true, 'GenerateFromFlow executed successfully.');
+        return opp;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // ✅ Test: Guard clause when no Opportunity Id provided
-    // ─────────────────────────────────────────────────────────────
+    // Minimal active Document Template
+    private static DocumentTemplate makeTemplate(String name) {
+        DocumentTemplate dt = new DocumentTemplate(
+            Name     = name,
+            IsActive = true
+        );
+        insert dt;
+        return dt;
+    }
+
+    // Create a ContentVersion (and hence a ContentDocument) we can point doc gen at
+    private static ContentVersion makeContentVersion() {
+        Blob b = Blob.valueOf('test doc body');
+        ContentVersion cv = new ContentVersion(
+            Title = 'UnitTestTemplate',
+            PathOnClient = 'UnitTestTemplate.docx',
+            VersionData = b
+        );
+        insert cv;
+        return [
+            SELECT Id, ContentDocumentId, VersionNumber
+            FROM ContentVersion
+            WHERE Id = :cv.Id
+            LIMIT 1
+        ];
+    }
+
+    /* -------------------- Tests -------------------- */
+
     @IsTest
-    static void testGuard_NoOpportunityId() {
+    static void testGuard_throwsWhenNoOppId() {
         Boolean thrown = false;
         Test.startTest();
         try {
@@ -116,33 +108,69 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
             thrown = e.getMessage().contains('No Opportunity Id');
         }
         Test.stopTest();
-        System.assert(thrown, 'Expected AuraHandledException when no Opportunity Id provided.');
+        System.assert(thrown, 'Expected AuraHandledException when no Opportunity Id.');
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // ✅ Test: Guard clause when invalid template inputs
-    // ─────────────────────────────────────────────────────────────
     @IsTest
-    static void testGuard_InvalidTemplate() {
-        // Minimal Account + Opportunity
-        Account a = new Account(Name='TempAcc', Phone='1234');
-        insert a;
-        Opportunity opp = new Opportunity(
-            Name='TempOpp', StageName='Prospecting', CloseDate=Date.today(), AccountId=a.Id, Funding_Source__c='Support at Home'
-        );
-        insert opp;
+    static void testNonSAH_noDGPInserted() {
+        Account a = makeAccount();
+        maica_cc__Funding__c f = makeFunding();
+        // Funding Item present, but Funding_Source__c is NOT Support at Home (non-SAH path)
+        makeFundingItem(f.Id, 1000);
 
-        // Wrapper with no template name or env var → should throw
-        Boolean thrown = false;
+        Opportunity opp = makeOpp(a.Id, f.Id, 'Some Other Source');
+
+        // Template + CV (not used in this path, but safe to create)
+        DocumentTemplate dt = makeTemplate('SupportAtHomeAgreement_Direct');
+        ContentVersion cv   = makeContentVersion();
+
+        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.docTemplateName = dt.Name;
+        w.templateContentVersionId = cv.Id;
+
         Test.startTest();
-        try {
-            MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-            w.recordIds = new List<Id>{ opp.Id };
-            MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-        } catch (AuraHandledException e) {
-            thrown = e.getMessage().contains('Document template name could not be resolved');
-        }
+        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
         Test.stopTest();
-        System.assert(thrown, 'Expected AuraHandledException for missing template info.');
+
+        // Should NOT create DocumentGenerationProcess, because guard exits on non-SAH.
+        List<DocumentGenerationProcess> dgps = [
+            SELECT Id FROM DocumentGenerationProcess WHERE ReferenceObject = :opp.Id
+        ];
+        System.assertEquals(0, dgps.size(), 'Non-SAH path should not insert DGP.');
+    }
+
+    @IsTest
+    static void testSAH_insertsDGP() {
+        Account a = makeAccount();
+        maica_cc__Funding__c f = makeFunding();
+        makeFundingItem(f.Id, 2500); // ensures a tier path is set
+
+        Opportunity opp = makeOpp(a.Id, f.Id, 'Support at Home');
+
+        // Provide Template + ContentVersion directly; we are not using CMDT in tests.
+        String tmplName = 'SupportAtHomeAgreement_Direct';
+        DocumentTemplate dt = makeTemplate(tmplName);
+        ContentVersion cv   = makeContentVersion();
+
+        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.docTemplateName = dt.Name;                 // direct
+        w.templateContentVersionId = cv.Id;          // direct
+
+        Test.startTest();
+        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
+        Test.stopTest();
+
+        // Validate a DGP was created for this Opportunity
+        List<DocumentGenerationProcess> dgps = [
+            SELECT Id, ReferenceObject, DocumentTemplateId, Type, DocGenApiVersionType
+            FROM DocumentGenerationProcess
+            WHERE ReferenceObject = :opp.Id
+        ];
+        System.assertEquals(1, dgps.size(), 'Expected exactly one DGP for SAH run.');
+        System.assertEquals('GenerateAndConvert', dgps[0].Type, 'DGP Type mismatch');
+        System.assertEquals('Advanced', dgps[0].DocGenApiVersionType, 'DGP API type mismatch');
+        System.assertEquals(opp.Id, dgps[0].ReferenceObject, 'DGP should be linked to Opportunity');
     }
 }
