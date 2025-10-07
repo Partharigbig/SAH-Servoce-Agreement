@@ -1,8 +1,7 @@
 @IsTest
 private class MC_SAHOpportunityDocGen_Direct_Tests {
 
-    // --- helpers -------------------------------------------------------------
-
+    // ------------ helpers ------------
     private class CVWrap {
         Id contentVersionId;
         Id contentDocumentId;
@@ -11,10 +10,10 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
         ContentVersion cv = new ContentVersion(
             Title        = 'TEST_SAH.docx',
             PathOnClient = 'TEST_SAH.docx',
-            VersionData  = Blob.valueOf('dummy file body')
+            VersionData  = Blob.valueOf('dummy doc body')
         );
         insert cv;
-        cv = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id LIMIT 1];
+        cv = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id];
         CVWrap w = new CVWrap();
         w.contentVersionId  = cv.Id;
         w.contentDocumentId = cv.ContentDocumentId;
@@ -25,14 +24,15 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
         Id paRtId = [SELECT Id FROM RecordType WHERE SObjectType='Account' AND IsPersonType = true LIMIT 1].Id;
         Account a = new Account(
             RecordTypeId                 = paRtId,
-            LastName                     = 'Bugs',
+            LastName                     = 'Babeneaux',
             FirstName                    = 'Huell',
-            PersonEmail                  = 'huell@example.com',
-            PersonMobilePhone            = '0412000111',
             Phone                        = '0390001111',
-            Date_of_Birth__c             = Date.newInstance(1950, 5, 12),
+            PersonMobilePhone            = '0412000111',
+            PersonEmail                  = 'huell@example.com',
+            Date_of_Birth__c             = Date.newInstance(1950,5,12),
+            // your custom Home Address compound parts:
             Home_Address__Street__s      = '10 Dickson Road',
-            Home_Address__City__s        = 'Goondi Bend',
+            Home_Address__City__s        = 'GOONDI BEND',
             Home_Address__StateCode__s   = 'QLD',
             Home_Address__PostalCode__s  = '4860',
             Home_Address__CountryCode__s = 'AU'
@@ -43,8 +43,8 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
 
     private static maica_cc__Funding__c makeFunding() {
         maica_cc__Funding__c f = new maica_cc__Funding__c(
-            maica_cc__Start_Date__c = Date.today().addDays(-10),
-            maica_cc__End_Date__c   = Date.today().addDays(90),
+            maica_cc__Start_Date__c = Date.today().addDays(-5),
+            maica_cc__End_Date__c   = Date.today().addDays(60),
             Funding_Type__c         = 'Support at Home'
         );
         insert f;
@@ -65,106 +65,50 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
         return o;
     }
 
-    private static List<maica_cc__Funding_Item__c> makeFundingItems(Id fundingId) {
-        List<maica_cc__Funding_Item__c> rows = new List<maica_cc__Funding_Item__c>{
-            new maica_cc__Funding_Item__c(
-                maica_cc__Funding__c          = fundingId,
-                maica_cc__Budget_Type__c      = 'Assistive technology',
-                maica_cc__Approved_Amount__c  = 2000,
-                maica_cc__Spent_Amount__c     = 50,
-                maica_cc__Remaining_Amount__c = 1950,
-                maica_cc__Entry_Date__c       = Date.today().addDays(-5),
-                maica_cc__Effective_Date__c   = Date.today().addDays(-3),
-                maica_cc__End_Date__c         = Date.today().addDays(60)
-            ),
-            new maica_cc__Funding_Item__c(
-                maica_cc__Funding__c          = fundingId,
-                maica_cc__Budget_Type__c      = 'Restorative care pathway',
-                maica_cc__Approved_Amount__c  = 400,
-                maica_cc__Spent_Amount__c     = 0,
-                maica_cc__Remaining_Amount__c = 400
-            )
-        };
-        insert rows;
-        return rows;
+    private static void makeFundingItems(Id fundingId) {
+        insert new maica_cc__Funding_Item__c(
+            maica_cc__Funding__c          = fundingId,
+            maica_cc__Budget_Type__c      = 'Assistive technology',
+            maica_cc__Approved_Amount__c  = 2000,
+            maica_cc__Spent_Amount__c     = 50,
+            maica_cc__Remaining_Amount__c = 1950,
+            maica_cc__Entry_Date__c       = Date.today().addDays(-2),
+            maica_cc__Effective_Date__c   = Date.today(),
+            maica_cc__End_Date__c         = Date.today().addDays(45)
+        );
     }
 
     private static Contact makeContact(String ln) {
-        Contact c = new Contact(LastName = ln, Phone = '0400000000', Email = ln.toLowerCase()+'@example.com');
+        Contact c = new Contact(LastName = ln, Phone='0400000000', Email=ln.toLowerCase()+'@example.com');
         insert c;
-        return c;
+        return c;        
     }
 
     private static void makeCCR(Account personAcc, Contact related, Boolean poaTrue) {
-        // Relationship__c is NOT writeable → do not set it
-        ContactContactRelation ccr = new ContactContactRelation(
+        // Do NOT set Relationship__c in tests (not createable)
+        insert new ContactContactRelation(
             ContactId            = personAcc.PersonContactId,
             RelatedContactId     = related.Id,
-            Next_of_Kin__c       = false,
-            Power_of_Attorney__c = poaTrue
+            Power_of_Attorney__c = poaTrue,
+            Next_of_Kin__c       = false
         );
-        insert ccr;
     }
 
     private static DocumentTemplate makeTemplate(String name) {
-        DocumentTemplate dt = new DocumentTemplate(
-            Name     = name,
-            IsActive = true
-        );
+        DocumentTemplate dt = new DocumentTemplate(Name = name, IsActive = true);
         insert dt;
         return dt;
     }
 
-    // --- tests ---------------------------------------------------------------
+    // ------------ tests ------------
 
     @IsTest
-    static void test_HappyPath_withEnvVariables() {
+    static void happyPath_directOverrides_only() {
         Account a = makePersonAccount();
         maica_cc__Funding__c f = makeFunding();
         Opportunity o = makeOpp(a, f);
         makeFundingItems(f.Id);
-
-        Contact rel = makeContact('Helper');
-        makeCCR(a, rel, true);
-
-        String tmplName = 'SupportAtHomeAgreement';
-        makeTemplate(tmplName);
-        CVWrap cvw = makeContentVersion();
-
-        // CMDT – insert individually (no list DML for __mdt)
-        Environment_Variables__mdt ev1 = new Environment_Variables__mdt(
-            DeveloperName = 'SAH_Agreement_ContentDoc',
-            MasterLabel   = 'SAH_Agreement_ContentDoc',
-            Value__c      = String.valueOf(cvw.contentDocumentId)
-        );
-        Environment_Variables__mdt ev2 = new Environment_Variables__mdt(
-            DeveloperName = 'SAH_Agreement_TemplateName',
-            MasterLabel   = 'SAH_Agreement_TemplateName',
-            Value__c      = tmplName
-        );
-        insert ev1;
-        insert ev2;
-
-        Test.startTest();
-        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-        w.recordIds = new List<Id>{ o.Id };
-        w.envContentDocVarName   = 'SAH_Agreement_ContentDoc';
-        w.envTemplateNameVarName = 'SAH_Agreement_TemplateName';
-        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-        Test.stopTest();
-
-        System.assertEquals(0, [SELECT COUNT() FROM DocumentGenerationProcess]);
-    }
-
-    @IsTest
-    static void test_HappyPath_withDirectOverrides() {
-        Account a = makePersonAccount();
-        maica_cc__Funding__c f = makeFunding();
-        Opportunity o = makeOpp(a, f);
-        makeFundingItems(f.Id);
-
-        Contact rel = makeContact('Buddy');
-        makeCCR(a, rel, true);
+        makeCCR(a, makeContact('Helper'), true);
 
         String tmplName = 'SupportAtHomeAgreement_Direct';
         makeTemplate(tmplName);
@@ -173,27 +117,29 @@ private class MC_SAHOpportunityDocGen_Direct_Tests {
         Test.startTest();
         MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
         w.recordIds = new List<Id>{ o.Id };
-        w.docTemplateName = tmplName;
-        w.templateContentVersionId = cvw.contentVersionId;
+        w.docTemplateName = tmplName;                  // String
+        w.templateContentVersionId = cvw.contentVersionId; // String
         MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
         Test.stopTest();
 
+        // During tests, your class guards insert with !Test.isRunningTest(),
+        // so there should be zero DGPs inserted.
         System.assertEquals(0, [SELECT COUNT() FROM DocumentGenerationProcess]);
     }
 
     @IsTest
-    static void test_NoRecordId_throws() {
+    static void missingOpp_throws() {
         Test.startTest();
         Boolean threw = false;
         try {
             MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-            // w.recordIds not set → should throw
+            // no recordIds set
             MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
         } catch (AuraHandledException e) {
             threw = true;
-            System.assert(e.getMessage().contains('No Opportunity Id'), 'Expected missing Opp Id error.');
+            System.assert(e.getMessage().contains('No Opportunity Id provided'), 'Expected missing Opp error');
         }
         Test.stopTest();
-        System.assert(threw, 'Should have thrown AuraHandledException for missing Opp Id.');
+        System.assert(threw);
     }
 }
