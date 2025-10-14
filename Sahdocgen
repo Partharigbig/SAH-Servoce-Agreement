@@ -1,14 +1,33 @@
+/******************************************************************************************
+ * MC_OpportunityDocGen_Agreements
+ * Single-button generator for multiple agreements (SAH / General, extendable).
+ *
+ * Selection:
+ *   - Chooses the DOCX to merge *only* via ENV (CMDT) ContentDocumentId:
+ *       Support at Home  -> SAH_Agreement_ContentId
+ *       Otherwise        -> Service_Agreement_ContentId
+ *
+ *   - Uses ONE generic DocumentTemplate (mapping config) by constant name.
+ *     (No template name from Flow, no template name in ENV.)
+ *
+ * Flow input:
+ *   - recordIds[0]  (Opportunity Id)  [REQUIRED]
+ *   - (Optional) templateContentVersionId (override specific CV if ever needed)
+ *
+ * Output:
+ *   - Inserts DocumentGenerationProcess (DOCX) attached to Opportunity → Files
+ ******************************************************************************************/
 public without sharing class MC_OpportunityDocGen_Agreements {
+
+    // ====== Configure your ONE generic DocumentTemplate record name here ======
+    private static final String DEFAULT_TEMPLATE_NAME = 'GeneralServiceAgreementTemplate';
 
     public class Wrapper {
         @InvocableVariable(required=true)
-        public List<Id> recordIds;                  // Opportunity Id(s) – first used
+        public List<Id> recordIds;                 // Opportunity Id(s) – first used
 
-        // Optional direct override (pin a specific version if you want)
-        @InvocableVariable public String templateContentVersionId;     // ContentVersion.Id
-
-        // Required from Flow (one template for both agreements)
-        @InvocableVariable public String docTemplateName;              // DocumentTemplate.Name
+        // Optional: override a specific ContentVersion.Id (rarely needed)
+        @InvocableVariable public String templateContentVersionId;
     }
 
     @InvocableMethod(label='Generate Agreement (auto by Funding Source)')
@@ -21,33 +40,33 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     private static void process(Wrapper w) {
-        final Id oppId = w.recordIds[0];
+        Id oppId = w.recordIds[0];
 
-        // ---- Opportunity (includes dates + Funding + Funding Admin) ----
+        // --- Opportunity
         Opportunity opp = [
             SELECT Id, Name, StageName, CloseDate, Amount,
-                   AccountId, Funding__c, Funding_Source__c,
-                   Agreement_Start_Date__c, Agreement_End_Date__c,
-                   Funding_Administrator__c
+                   AccountId, Funding__c, Funding_Source__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
         ];
 
-        // ---- Account (participant) ----
-        Account acc = opp.AccountId == null ? null :
-            [SELECT Id, Name, FirstName, LastName, PersonEmail, Phone, PersonMobilePhone,
-                    Date_of_Birth__c, PersonContactId, PersonTitle, Region__c,
-                    // Billing (for Address for Service)
-                    BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry,
-                    // Home (kept for backward compatibility tokens)
-                    Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
-                    Home_Address__PostalCode__s, Home_Address__CountryCode__s
-             FROM Account
-             WHERE Id = :opp.AccountId
-             LIMIT 1];
+        // --- Parent: Account (Person Account friendly)
+        Account acc = null;
+        if (opp.AccountId != null) {
+            List<Account> accRows = [
+                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
+                       FirstName, LastName, Date_of_Birth__c, PersonContactId,
+                       Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
+                       Home_Address__PostalCode__s, Home_Address__CountryCode__s
+                FROM Account
+                WHERE Id = :opp.AccountId
+                LIMIT 1
+            ];
+            if (!accRows.isEmpty()) acc = accRows[0];
+        }
 
-        // ---- Funding (parent) ----
+        // --- Parent: Funding (if linked)
         maica_cc__Funding__c funding = null;
         if (opp.Funding__c != null) {
             List<maica_cc__Funding__c> fRows = [
@@ -59,25 +78,20 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (!fRows.isEmpty()) funding = fRows[0];
         }
 
-        // ---- Funding Items (child of Funding) ----
+        // --- Child of Funding: Funding Items
         List<maica_cc__Funding_Item__c> fundingItemList = new List<maica_cc__Funding_Item__c>();
         if (funding != null) {
             fundingItemList = [
-                SELECT Id, Name,
-                       maica_cc__Budget_Type__c,
-                       maica_cc__Approved_Amount__c,
-                       maica_cc__Spent_Amount__c,
-                       maica_cc__Remaining_Amount__c,
-                       maica_cc__Entry_Date__c,
-                       maica_cc__Effective_Date__c,
-                       maica_cc__End_Date__c,
+                SELECT Id, Name, maica_cc__Budget_Type__c,
+                       maica_cc__Approved_Amount__c, maica_cc__Spent_Amount__c, maica_cc__Remaining_Amount__c,
+                       maica_cc__Entry_Date__c, maica_cc__Effective_Date__c, maica_cc__End_Date__c,
                        maica_cc__Funding__c
                 FROM maica_cc__Funding_Item__c
                 WHERE maica_cc__Funding__c = :funding.Id
             ];
         }
 
-        // ---- CCR (PoA only) – child of Account via PersonContactId ----
+        // --- Child of Account: CCRs (PoA only)
         List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
         if (acc != null && acc.PersonContactId != null) {
             ccrList = [
@@ -93,53 +107,40 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             ];
         }
 
-        // ---- Funding Administrator (lookup Account on Opportunity) ----
-        Account fa = opp.Funding_Administrator__c == null ? null :
-            [SELECT Id, Name, PersonEmail, PersonMobilePhone,
-                    BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry
-             FROM Account
-             WHERE Id = :opp.Funding_Administrator__c
-             LIMIT 1];
-
-        // ---- Section flags based on Funding Items' Budget Type ----
-        Boolean showPartG_AT_HM = false, showPartH_Restorative = false, showPartI_EndOfLife = false;
+        // --- Section flags based on Funding Items' Budget Type (for SAH doc visibility rules)
+        Boolean showPartG_AT_HM = false;
+        Boolean showPartH_Restorative = false;
+        Boolean showPartI_EndOfLife  = false;
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             String bt = fi.maica_cc__Budget_Type__c;
             if (bt == null) continue;
             bt = bt.trim();
-            if (bt == 'Assistive technology' || bt == 'Home modifications' || bt == 'Assistive technology specified needs')
-                showPartG_AT_HM = true;
+            if (bt == 'Assistive technology' ||
+                bt == 'Home modifications' ||
+                bt == 'Assistive technology specified needs') showPartG_AT_HM = true;
             if (bt == 'Restorative care pathway') showPartH_Restorative = true;
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // ---- Token map (kept compatible with your earlier SAH template) ----
+        // --- Tokens
         Map<String, Object> token = new Map<String, Object>();
 
-        // Opportunity tokens
+        // Opportunity
         token.put('OppName', opp.Name);
         token.put('OppStage', opp.StageName);
         token.put('OppCloseDate', formatDate(opp.CloseDate));
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
 
-        token.put('AgreementStartDate', formatDate(opp.Agreement_Start_Date__c));
-        token.put('AgreementEndDate',   formatDate(opp.Agreement_End_Date__c));
-        token.put('ServiceReviewDate',  formatDate(Date.today().addYears(1))); // example token you used
-
-        // Account tokens
+        // Account
         if (acc != null) {
-            token.put('AccountName',      acc.Name);
+            token.put('AccountName', acc.Name);
             token.put('AccountFirstName', acc.FirstName);
-            token.put('AccountLastName',  acc.LastName);
-            token.put('AccountDOB',       formatDate(acc.Date_of_Birth__c));
-            token.put('AccountPhone',     acc.Phone);
-            token.put('AccountMobile',    acc.PersonMobilePhone);
-            token.put('AccountEmail',     acc.PersonEmail);
-            token.put('AccountTitle',     acc.PersonTitle);
-            token.put('AccountRegion',    acc.Region__c);
-
-            // Home address (legacy token you used)
+            token.put('AccountLastName', acc.LastName);
+            token.put('AccountDOB', formatDate(acc.Date_of_Birth__c));
+            token.put('AccountPhone', acc.Phone);
+            token.put('AccountMobile', acc.PersonMobilePhone);
+            token.put('AccountEmail', acc.PersonEmail);
             token.put('AccountHomeAddress',
                 formatAddress(
                     acc.Home_Address__Street__s,
@@ -149,15 +150,9 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                     acc.Home_Address__CountryCode__s
                 )
             );
-
-            // Billing address (Address for Service)
-            token.put('AccountBillingAddress',
-                formatAddress(acc.BillingStreet, acc.BillingCity, acc.BillingState,
-                              acc.BillingPostalCode, acc.BillingCountry)
-            );
         }
 
-        // Funding tokens
+        // Funding
         if (funding != null) {
             token.put('FundingName', funding.Name);
             token.put('FundingStartDate', formatDate(funding.maica_cc__Start_Date__c));
@@ -165,33 +160,23 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('FundingType',      funding.Funding_Type__c);
         }
 
-        // Funding Administrator tokens
-        if (fa != null) {
-            token.put('FundingAdminName',  fa.Name);
-            token.put('FundingAdminEmail', fa.PersonEmail);
-            token.put('FundingAdminPhone', fa.PersonMobilePhone);
-            token.put('FundingAdminBillingAddress',
-                formatAddress(fa.BillingStreet, fa.BillingCity, fa.BillingState,
-                              fa.BillingPostalCode, fa.BillingCountry)
-            );
-        }
-
-        // CCR list (repeatable block list)
+        // CCR list rows
         List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
             cIdx++;
             Map<String, Object> row = new Map<String, Object>();
-            row.put('RelatedContactName',  (ccr.RelatedContact != null ? ccr.RelatedContact.Name  : null));
-            row.put('RelatedContactPhone', (ccr.RelatedContact != null ? ccr.RelatedContact.Phone : null));
-            row.put('RelatedContactEmail', (ccr.RelatedContact != null ? ccr.RelatedContact.Email : null));
+            row.put('RelatedContactName',   ccr.RelatedContact != null ? ccr.RelatedContact.Name  : null);
+            row.put('RelatedContactPhone',  ccr.RelatedContact != null ? ccr.RelatedContact.Phone : null);
+            row.put('RelatedContactEmail',  ccr.RelatedContact != null ? ccr.RelatedContact.Email : null);
             row.put('RelatedContactAddress',
                 ccr.RelatedContact != null
-                ? formatAddress(ccr.RelatedContact.MailingStreet, ccr.RelatedContact.MailingCity,
-                                ccr.RelatedContact.MailingState,  ccr.RelatedContact.MailingPostalCode,
+                ? formatAddress(ccr.RelatedContact.MailingStreet,
+                                ccr.RelatedContact.MailingCity,
+                                ccr.RelatedContact.MailingState,
+                                ccr.RelatedContact.MailingPostalCode,
                                 ccr.RelatedContact.MailingCountry)
-                : null
-            );
+                : null);
             row.put('PowerOfAttorney', ccr.Power_of_Attorney__c);
             row.put('Relationship',    ccr.Relationship__c);
             row.put('IsNextOfKin',     ccr.Next_of_Kin__c);
@@ -200,14 +185,14 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         }
         token.put('CCRList', ccrOut);
 
-        // Funding Items list (repeatable block list)
+        // Funding Items table
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             Map<String,Object> row = new Map<String,Object>();
             row.put('FundingItemName', fi.Name);
             row.put('BudgetType', fi.maica_cc__Budget_Type__c);
 
-            // raw
+            // raw values
             row.put('ApprovedAmount',  fi.maica_cc__Approved_Amount__c);
             row.put('SpentAmount',     fi.maica_cc__Spent_Amount__c);
             row.put('RemainingAmount', fi.maica_cc__Remaining_Amount__c);
@@ -215,12 +200,12 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             row.put('EffectiveDate',   formatDate(fi.maica_cc__Effective_Date__c));
             row.put('EndDate',         formatDate(fi.maica_cc__End_Date__c));
 
-            // display currency
+            // display
             row.put('Approved_Amount_Display',   formatCurrency(fi.maica_cc__Approved_Amount__c));
             row.put('Spent_Amount_Display',      formatCurrency(fi.maica_cc__Spent_Amount__c));
             row.put('Remaining_Amount_Display',  formatCurrency(fi.maica_cc__Remaining_Amount__c));
 
-            // tier/range label
+            // tier by range
             row.put('FundingTier', classifyTier(fi.maica_cc__Approved_Amount__c));
 
             fiOut.add(row);
@@ -232,53 +217,57 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('showPartH_Restorative', showPartH_Restorative);
         token.put('showPartI_EndOfLife',   showPartI_EndOfLife);
 
-        // ==== Choose the DOCX by Funding Source using ENV CMDT (ContentDocumentId) ====
-        String fs = opp.Funding_Source__c == null ? '' : opp.Funding_Source__c.trim();
-        String envDevName = (fs == 'Support at Home') ? 'SAH_Agreement_ContentId' : 'Service_Agreement_ContentId';
+        /********** PICK DOCX BY ENV (NO TEMPLATE NAME FROM FLOW/ENV) **********/
+        // Decide which ENV key to use purely from Funding Source
+        String fs = opp.Funding_Source__c;
+        String envDevName = (fs == 'Support at Home')
+            ? 'SAH_Agreement_ContentId'
+            : 'Service_Agreement_ContentId';
 
-        // Allow a direct override (CV Id) from Flow; else resolve latest by ContentDocumentId
+        // Allow optional override of ContentVersionId from Flow, else resolve via ENV
         String contentVersionId = w.templateContentVersionId;
+
         if (String.isBlank(contentVersionId)) {
             Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envDevName });
             String contentDocumentIdStr = envMap.get(envDevName);
-            if (String.isBlank(contentDocumentIdStr)) {
-                throw new AuraHandledException('Environment variable ' + envDevName +
-                    ' has no Value__c (expected ContentDocumentId starting with 069).');
+
+            if (String.isBlank(contentDocumentIdStr) || !contentDocumentIdStr.startsWith('069')) {
+                throw new AuraHandledException('Invalid or missing ContentDocumentId in CMDT for ' + envDevName);
             }
-            Id contentDocumentId = (Id)contentDocumentIdStr;
 
             ContentVersion cv = [
                 SELECT Id
                 FROM ContentVersion
-                WHERE ContentDocumentId = :contentDocumentId
+                WHERE ContentDocumentId = :contentDocumentIdStr
                 ORDER BY VersionNumber DESC NULLS LAST
                 LIMIT 1
             ];
-            contentVersionId = cv.Id;
+            if (cv.isEmpty()) {
+                throw new AuraHandledException('No ContentVersion found for ContentDocumentId ' + contentDocumentIdStr);
+            }
+            contentVersionId = cv[0].Id;
         }
 
-        // ==== Resolve the DocumentTemplate to drive mapping rules ====
-        if (String.isBlank(w.docTemplateName)) {
-            throw new AuraHandledException('docTemplateName (DocumentTemplate.Name) is required.');
-        }
+        // Reuse ONE generic DocumentTemplate (mapping configuration)
         DocumentTemplate tmpl = [
             SELECT Id, Name
             FROM DocumentTemplate
-            WHERE Name = :w.docTemplateName AND IsActive = true
+            WHERE Name = :DEFAULT_TEMPLATE_NAME
+              AND IsActive = true
             LIMIT 1
         ];
 
-        // ==== Build request for WORD output (no PDF conversion) ====
-        Map<String,Object> req = new Map<String,Object>{
+        // Build DocGen request (DOCX output)
+        Map<String, Object> req = new Map<String, Object>{
             'templateContentVersionId' => contentVersionId,
-            'title'                    => w.docTemplateName + '_' + (acc != null ? acc.Name : opp.Name),
+            'title'                    => DEFAULT_TEMPLATE_NAME + '_' + (acc != null ? acc.Name : opp.Name),
             'keepIntermediate'         => false
         };
 
         DocumentGenerationProcess dgp = new DocumentGenerationProcess();
-        dgp.Type                 = 'Generate';          // => WORD output
+        dgp.Type                 = 'Generate';              // DOCX (not PDF)
         dgp.RequestText          = JSON.serialize(req);
-        dgp.ReferenceObject      = opp.Id;              // file attaches to Opportunity
+        dgp.ReferenceObject      = opp.Id;                  // File on Opportunity
         dgp.TokenData            = JSON.serialize(token);
         dgp.DocGenApiVersionType = 'Advanced';
         dgp.DocumentTemplateId   = tmpl.Id;
@@ -287,6 +276,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     /* ================= Helpers ================= */
+
+    /** Read Environment_Variables__mdt by DeveloperName and return map<DeveloperName, Value__c> */
     private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
         Map<String,String> out = new Map<String,String>();
         if (developerNames == null || developerNames.isEmpty()) return out;
