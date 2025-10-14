@@ -164,7 +164,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         }
 
         // CCR list
-        List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
+       List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
             cIdx++;
@@ -282,7 +282,7 @@ public without sharing class MC_SAHOpportunityDocGen_Direct {
         };
 
         DocumentGenerationProcess dgp = new DocumentGenerationProcess();
-        dgp.Type                 = 'GenerateAndConvert';
+        dgp.Type                 = 'Generate';
         dgp.RequestText          = JSON.serialize(req);
         dgp.ReferenceObject      = opp.Id; // will appear under Opportunity → Files
         dgp.TokenData            = JSON.serialize(token);
