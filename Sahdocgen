@@ -1,33 +1,20 @@
-/******************************************************************************************
- * MC_OpportunityDocGen_Agreements
- * Single-button generator for multiple agreements (SAH / General, extendable).
- *
- * Selection:
- *   - Chooses the DOCX to merge *only* via ENV (CMDT) ContentDocumentId:
- *       Support at Home  -> SAH_Agreement_ContentId
- *       Otherwise        -> Service_Agreement_ContentId
- *
- *   - Uses ONE generic DocumentTemplate (mapping config) by constant name.
- *     (No template name from Flow, no template name in ENV.)
- *
- * Flow input:
- *   - recordIds[0]  (Opportunity Id)  [REQUIRED]
- *   - (Optional) templateContentVersionId (override specific CV if ever needed)
- *
- * Output:
- *   - Inserts DocumentGenerationProcess (DOCX) attached to Opportunity → Files
- ******************************************************************************************/
 public without sharing class MC_OpportunityDocGen_Agreements {
 
-    // ====== Configure your ONE generic DocumentTemplate record name here ======
-    private static final String DEFAULT_TEMPLATE_NAME = 'GeneralServiceAgreementTemplate';
+    /* ================= Public Flow API ================= */
 
     public class Wrapper {
         @InvocableVariable(required=true)
         public List<Id> recordIds;                 // Opportunity Id(s) – first used
 
-        // Optional: override a specific ContentVersion.Id (rarely needed)
-        @InvocableVariable public String templateContentVersionId;
+        // Optional direct overrides (kept for flexibility; you can ignore in Flow)
+        @InvocableVariable public String docTemplateName;             // DocumentTemplate.Name
+        @InvocableVariable public String templateContentVersionId;    // ContentVersion.Id
+
+        // Optional: dynamic by ENV variable *names* (DeveloperName of Environment_Variables__mdt)
+        // If you leave these blank, the class will auto-pick by Funding Source:
+        //  SAH_Agreement_ContentId / NDIS_Agreement_ContentId / Service_Agreement_ContentId
+        @InvocableVariable public String envContentDocVarName;        // Value__c = ContentDocumentId
+        @InvocableVariable public String envTemplateNameVarName;      // Value__c = DocumentTemplate.Name
     }
 
     @InvocableMethod(label='Generate Agreement (auto by Funding Source)')
@@ -39,19 +26,44 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         process(inputs[0]);
     }
 
+    /* ================= Implementation ================= */
+
+    // Generic template to reuse for all agreements (mapping-only template; must be Active)
+    private static final String DEFAULT_TEMPLATE_NAME = 'GeneralServiceAgreementTemplate';
+
+    // ENV DeveloperNames we’ll use when Flow doesn’t override
+    private static final String ENV_SAH   = 'SAH_Agreement_ContentId';
+    private static final String ENV_NDIS  = 'NDIS_Agreement_ContentId';
+    private static final String ENV_GEN   = 'Service_Agreement_ContentId';
+
+    // Which Funding Source goes to which ENV DeveloperName
+    private static String pickEnvKeyByFunding(String fundingSource) {
+        if (String.isBlank(fundingSource)) return ENV_GEN;
+        String fs = fundingSource.trim();
+        if (fs == 'Support at Home') return ENV_SAH;
+        if (fs == 'NDIS')            return ENV_NDIS;
+        // Block Funding, DVA, Self Funding, Partner organisation, etc.
+        return ENV_GEN;
+    }
+
     private static void process(Wrapper w) {
         Id oppId = w.recordIds[0];
 
-        // --- Opportunity
-        Opportunity opp = [
+        /* -------- Opportunity -------- */
+        Opportunity opp = null;
+        List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
                    AccountId, Funding__c, Funding_Source__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
         ];
+        if (!oppRows.isEmpty()) opp = oppRows[0];
+        if (opp == null) {
+            throw new AuraHandledException('Opportunity not found for Id: ' + String.valueOf(oppId));
+        }
 
-        // --- Parent: Account (Person Account friendly)
+        /* -------- Account (Person Account) -------- */
         Account acc = null;
         if (opp.AccountId != null) {
             List<Account> accRows = [
@@ -66,7 +78,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (!accRows.isEmpty()) acc = accRows[0];
         }
 
-        // --- Parent: Funding (if linked)
+        /* -------- Funding parent -------- */
         maica_cc__Funding__c funding = null;
         if (opp.Funding__c != null) {
             List<maica_cc__Funding__c> fRows = [
@@ -78,7 +90,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (!fRows.isEmpty()) funding = fRows[0];
         }
 
-        // --- Child of Funding: Funding Items
+        /* -------- Funding Items (child of Funding) -------- */
         List<maica_cc__Funding_Item__c> fundingItemList = new List<maica_cc__Funding_Item__c>();
         if (funding != null) {
             fundingItemList = [
@@ -91,7 +103,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             ];
         }
 
-        // --- Child of Account: CCRs (PoA only)
+        /* -------- ContactContactRelation (PoA only) -------- */
         List<ContactContactRelation> ccrList = new List<ContactContactRelation>();
         if (acc != null && acc.PersonContactId != null) {
             ccrList = [
@@ -107,7 +119,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             ];
         }
 
-        // --- Section flags based on Funding Items' Budget Type (for SAH doc visibility rules)
+        /* -------- Flags from Funding Items -------- */
         Boolean showPartG_AT_HM = false;
         Boolean showPartH_Restorative = false;
         Boolean showPartI_EndOfLife  = false;
@@ -122,7 +134,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
 
-        // --- Tokens
+        /* -------- Tokens -------- */
         Map<String, Object> token = new Map<String, Object>();
 
         // Opportunity
@@ -152,7 +164,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             );
         }
 
-        // Funding
+        // Funding (parent)
         if (funding != null) {
             token.put('FundingName', funding.Name);
             token.put('FundingStartDate', formatDate(funding.maica_cc__Start_Date__c));
@@ -160,7 +172,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('FundingType',      funding.Funding_Type__c);
         }
 
-        // CCR list rows
+        // CCR list
         List<Map<String, Object>> ccrOut = new List<Map<String, Object>>();
         Integer cIdx = 0;
         for (ContactContactRelation ccr : ccrList) {
@@ -185,14 +197,14 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         }
         token.put('CCRList', ccrOut);
 
-        // Funding Items table
+        // Funding Items list
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
         for (maica_cc__Funding_Item__c fi : fundingItemList) {
             Map<String,Object> row = new Map<String,Object>();
             row.put('FundingItemName', fi.Name);
             row.put('BudgetType', fi.maica_cc__Budget_Type__c);
 
-            // raw values
+            // raw
             row.put('ApprovedAmount',  fi.maica_cc__Approved_Amount__c);
             row.put('SpentAmount',     fi.maica_cc__Spent_Amount__c);
             row.put('RemainingAmount', fi.maica_cc__Remaining_Amount__c);
@@ -205,40 +217,43 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             row.put('Spent_Amount_Display',      formatCurrency(fi.maica_cc__Spent_Amount__c));
             row.put('Remaining_Amount_Display',  formatCurrency(fi.maica_cc__Remaining_Amount__c));
 
-            // tier by range
+            // tier
             row.put('FundingTier', classifyTier(fi.maica_cc__Approved_Amount__c));
 
             fiOut.add(row);
         }
         token.put('FundingItemList', fiOut);
 
-        // Section flags
-        token.put('showPartG_AT_HM',       showPartG_AT_HM);
-        token.put('showPartH_Restorative', showPartH_Restorative);
-        token.put('showPartI_EndOfLife',   showPartI_EndOfLife);
+        // Flags
+        token.put('showPartG_AT_HM',        showPartG_AT_HM);
+        token.put('showPartH_Restorative',  showPartH_Restorative);
+        token.put('showPartI_EndOfLife',    showPartI_EndOfLife);
 
-        /********** PICK DOCX BY ENV (NO TEMPLATE NAME FROM FLOW/ENV) **********/
-        // Decide which ENV key to use purely from Funding Source
-        String fs = opp.Funding_Source__c;
-        String envDevName = (fs == 'Support at Home')
-            ? 'SAH_Agreement_ContentId'
-            : 'Service_Agreement_ContentId';
+        /* -------- Resolve which DOCX to use (ContentVersionId) via ENV -------- */
 
-        // Allow optional override of ContentVersionId from Flow, else resolve via ENV
+        // Allow direct override from Flow (rare)
         String contentVersionId = w.templateContentVersionId;
 
+        // If Flow passed a specific ENV key, use it; else auto-pick by Funding Source
+        String envKey = !String.isBlank(w.envContentDocVarName)
+                        ? w.envContentDocVarName
+                        : pickEnvKeyByFunding(opp.Funding_Source__c);
+
+        // Fetch ENV values
+        Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envKey });
+        String contentDocumentIdStr = envMap.get(envKey);
+
         if (String.isBlank(contentVersionId)) {
-            Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envDevName });
-            String contentDocumentIdStr = envMap.get(envDevName);
-
-            if (String.isBlank(contentDocumentIdStr) || !contentDocumentIdStr.startsWith('069')) {
-                throw new AuraHandledException('Invalid or missing ContentDocumentId in CMDT for ' + envDevName);
+            if (String.isBlank(contentDocumentIdStr)) {
+                throw new AuraHandledException('No Environment Variable found for ' + envKey + ' (Value__c should be a ContentDocumentId).');
             }
+            Id contentDocumentId = (Id) contentDocumentIdStr;
 
-            ContentVersion cv = [
+            // Resolve latest ContentVersionId for the ContentDocumentId
+            List<ContentVersion> cv = [
                 SELECT Id
                 FROM ContentVersion
-                WHERE ContentDocumentId = :contentDocumentIdStr
+                WHERE ContentDocumentId = :contentDocumentId
                 ORDER BY VersionNumber DESC NULLS LAST
                 LIMIT 1
             ];
@@ -248,26 +263,45 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             contentVersionId = cv[0].Id;
         }
 
-        // Reuse ONE generic DocumentTemplate (mapping configuration)
-        DocumentTemplate tmpl = [
+        /* -------- Resolve the generic DocumentTemplate (mapping-only) -------- */
+
+        String templateName = !String.isBlank(w.docTemplateName)
+                              ? w.docTemplateName
+                              : (!String.isBlank(w.envTemplateNameVarName)
+                                    ? getEnvValuesByNames(new Set<String>{ w.envTemplateNameVarName }).get(w.envTemplateNameVarName)
+                                    : DEFAULT_TEMPLATE_NAME);
+
+        List<DocumentTemplate> tmplRows = [
             SELECT Id, Name
             FROM DocumentTemplate
-            WHERE Name = :DEFAULT_TEMPLATE_NAME
-              AND IsActive = true
+            WHERE Name = :templateName AND IsActive = true
             LIMIT 1
         ];
+        if (tmplRows.isEmpty()) {
+            throw new AuraHandledException('Active DocumentTemplate not found for Name: ' + templateName);
+        }
+        DocumentTemplate tmpl = tmplRows[0];
 
-        // Build DocGen request (DOCX output)
+        /* -------- Title naming: <AgreementKey>_<FundingSource>_<Account/Oppty>_<yyyyMMdd_HHmmss> -------- */
+
+        String agreementKey = envKey; // shows which agreement key was used
+        String who = (acc != null ? acc.Name : opp.Name);
+        String ts  = Datetime.now().format('yyyyMMdd_HHmmss');
+        String niceFS = String.isBlank(opp.Funding_Source__c) ? 'Unknown' : opp.Funding_Source__c.replace(' ', '');
+        String title = agreementKey + '_' + niceFS + '_' + sanitizeTitle(who) + '_' + ts;
+
+        /* -------- Build DocGen request for DOCX output -------- */
+
         Map<String, Object> req = new Map<String, Object>{
             'templateContentVersionId' => contentVersionId,
-            'title'                    => DEFAULT_TEMPLATE_NAME + '_' + (acc != null ? acc.Name : opp.Name),
+            'title'                    => title,
             'keepIntermediate'         => false
         };
 
         DocumentGenerationProcess dgp = new DocumentGenerationProcess();
-        dgp.Type                 = 'Generate';              // DOCX (not PDF)
+        dgp.Type                 = 'Generate';           // DOCX output
         dgp.RequestText          = JSON.serialize(req);
-        dgp.ReferenceObject      = opp.Id;                  // File on Opportunity
+        dgp.ReferenceObject      = opp.Id;               // File will appear on Opportunity → Files
         dgp.TokenData            = JSON.serialize(token);
         dgp.DocGenApiVersionType = 'Advanced';
         dgp.DocumentTemplateId   = tmpl.Id;
@@ -313,5 +347,12 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         if (amt <= 2000)       return '$501 - $2000';
         if (amt <= 15000)      return '$2001 - $15000';
         return 'Above $15000';
+    }
+    private static String sanitizeTitle(String in) {
+        if (String.isBlank(in)) return 'Record';
+        // Remove characters that can’t be used in file names
+        String out = in.replaceAll('[\\\\/:*?\"<>|#%&{}$!@`~^+=]', ' ');
+        out = out.replaceAll('\\s+', '_');
+        return out.length() > 120 ? out.substring(0, 120) : out;
     }
 }
