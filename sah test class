@@ -1,176 +1,109 @@
-@IsTest
-private class MC_SAHOpportunityDocGen_Direct_Tests {
+BudgetId__c
 
-    /* -------------------- Helpers -------------------- */
+CreatedById
 
-    // Person Account not required for these tests; a simple Account is enough.
-    private static Account makeAccount() {
-        Account a = new Account(
-            Name = 'Acme Test Household'
-        );
-        // If you want to exercise the address formatter:
-        a.Home_Address__Street__s     = '10 Test St';
-        a.Home_Address__City__s       = 'Goondi Bend';
-        a.Home_Address__StateCode__s  = 'QLD';
-        a.Home_Address__PostalCode__s = '4860';
-        a.Home_Address__CountryCode__s= 'AU';
-        insert a;
-        return a;
-    }
+CreatedDate
 
-    private static maica_cc__Funding__c makeFunding() {
-        maica_cc__Funding__c f = new maica_cc__Funding__c(
-            maica_cc__Start_Date__c = Date.today(),
-            maica_cc__End_Date__c   = Date.today().addDays(30),
-            Funding_Type__c         = 'NDIS' // adjust if your org uses a different value
-        );
-        insert f;
-        return f;
-    }
+Funding_Administrator__c
 
-    private static maica_cc__Funding_Item__c makeFundingItem(Id fundingId, Decimal approved) {
-        maica_cc__Funding_Item__c fi = new maica_cc__Funding_Item__c(
-            maica_cc__Funding__c       = fundingId,
-            maica_cc__Budget_Type__c   = 'Assistive technology', // one of the flags
-            maica_cc__Approved_Amount__c  = approved,
-            maica_cc__Spent_Amount__c     = 0,
-            maica_cc__Remaining_Amount__c = approved,
-            maica_cc__Entry_Date__c       = Date.today(),
-            maica_cc__Effective_Date__c   = Date.today(),
-            maica_cc__End_Date__c         = Date.today().addDays(7)
-        );
-        insert fi;
-        return fi;
-    }
+Funding_Program__c
 
-    // Some orgs require a specific Record Type for Opportunity; this safely picks it if present.
-    private static Id tryGetOppRT(String name) {
-        Map<String, Schema.RecordTypeInfo> m = Schema.SObjectType.Opportunity.getRecordTypeInfosByName();
-        return m.containsKey(name) ? m.get(name).getRecordTypeId() : null;
-    }
+Funding_Type__c
 
-    private static Opportunity makeOpp(Id accountId, Id fundingId, String fundingSource) {
-        Opportunity opp = new Opportunity(
-            Name = 'Support Home Opp',
-            StageName = 'Prospecting',
-            CloseDate = Date.today().addDays(10),
-            AccountId = accountId,
-            Funding__c = fundingId,
-            Funding_Source__c = fundingSource,
-            OwnerId = UserInfo.getUserId()
-        );
-        Id rt = tryGetOppRT('Support at Home'); // safe if it doesn't exist
-        if (rt != null) opp.RecordTypeId = rt;
-        insert opp;
-        return opp;
-    }
+Id
 
-    // Minimal active Document Template
-    private static DocumentTemplate makeTemplate(String name) {
-        DocumentTemplate dt = new DocumentTemplate(
-            Name     = name,
-            IsActive = true
-        );
-        insert dt;
-        return dt;
-    }
+IsDeleted
 
-    // Create a ContentVersion (and hence a ContentDocument) we can point doc gen at
-    private static ContentVersion makeContentVersion() {
-        Blob b = Blob.valueOf('test doc body');
-        ContentVersion cv = new ContentVersion(
-            Title = 'UnitTestTemplate',
-            PathOnClient = 'UnitTestTemplate.docx',
-            VersionData = b
-        );
-        insert cv;
-        return [
-            SELECT Id, ContentDocumentId, VersionNumber
-            FROM ContentVersion
-            WHERE Id = :cv.Id
-            LIMIT 1
-        ];
-    }
+LastActivityDate
 
-    /* -------------------- Tests -------------------- */
+LastModifiedById
 
-    @IsTest
-    static void testGuard_throwsWhenNoOppId() {
-        Boolean thrown = false;
-        Test.startTest();
-        try {
-            MC_SAHOpportunityDocGen_Direct.generateFromFlow(
-                new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{
-                    new MC_SAHOpportunityDocGen_Direct.Wrapper()
-                }
-            );
-        } catch (AuraHandledException e) {
-            thrown = e.getMessage().contains('No Opportunity Id');
-        }
-        Test.stopTest();
-        System.assert(thrown, 'Expected AuraHandledException when no Opportunity Id.');
-    }
+LastModifiedDate
 
-    @IsTest
-    static void testNonSAH_noDGPInserted() {
-        Account a = makeAccount();
-        maica_cc__Funding__c f = makeFunding();
-        // Funding Item present, but Funding_Source__c is NOT Support at Home (non-SAH path)
-        makeFundingItem(f.Id, 1000);
+LastReferencedDate
 
-        Opportunity opp = makeOpp(a.Id, f.Id, 'Some Other Source');
+LastViewedDate
 
-        // Template + CV (not used in this path, but safe to create)
-        DocumentTemplate dt = makeTemplate('SupportAtHomeAgreement_Direct');
-        ContentVersion cv   = makeContentVersion();
+maica_cc__Active__c
 
-        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-        w.recordIds = new List<Id>{ opp.Id };
-        w.docTemplateName = dt.Name;
-        w.templateContentVersionId = cv.Id;
+maica_cc__Allocated_Amount__c
 
-        Test.startTest();
-        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-        Test.stopTest();
+maica_cc__Approved_Amount__c
 
-        // Should NOT create DocumentGenerationProcess, because guard exits on non-SAH.
-        List<DocumentGenerationProcess> dgps = [
-            SELECT Id FROM DocumentGenerationProcess WHERE ReferenceObject = :opp.Id
-        ];
-        System.assertEquals(0, dgps.size(), 'Non-SAH path should not insert DGP.');
-    }
+maica_cc__Claim_Period__c
 
-    @IsTest
-    static void testSAH_insertsDGP() {
-        Account a = makeAccount();
-        maica_cc__Funding__c f = makeFunding();
-        makeFundingItem(f.Id, 2500); // ensures a tier path is set
+maica_cc__Daily_Life__c
 
-        Opportunity opp = makeOpp(a.Id, f.Id, 'Support at Home');
+maica_cc__End_Date__c
 
-        // Provide Template + ContentVersion directly; we are not using CMDT in tests.
-        String tmplName = 'SupportAtHomeAgreement_Direct';
-        DocumentTemplate dt = makeTemplate(tmplName);
-        ContentVersion cv   = makeContentVersion();
+maica_cc__Exclude_From_Statement__c
 
-        MC_SAHOpportunityDocGen_Direct.Wrapper w = new MC_SAHOpportunityDocGen_Direct.Wrapper();
-        w.recordIds = new List<Id>{ opp.Id };
-        w.docTemplateName = dt.Name;                 // direct
-        w.templateContentVersionId = cv.Id;          // direct
+maica_cc__Funding_Duration_Weeks__c
 
-        Test.startTest();
-        MC_SAHOpportunityDocGen_Direct.generateFromFlow(new List<MC_SAHOpportunityDocGen_Direct.Wrapper>{ w });
-        Test.stopTest();
+maica_cc__Funding_Extended__c
 
-        // Validate a DGP was created for this Opportunity
-        List<DocumentGenerationProcess> dgps = [
-            SELECT Id, ReferenceObject, DocumentTemplateId, Type, DocGenApiVersionType
-            FROM DocumentGenerationProcess
-            WHERE ReferenceObject = :opp.Id
-        ];
-        System.assertEquals(1, dgps.size(), 'Expected exactly one DGP for SAH run.');
-        System.assertEquals('GenerateAndConvert', dgps[0].Type, 'DGP Type mismatch');
-        System.assertEquals('Advanced', dgps[0].DocGenApiVersionType, 'DGP API type mismatch');
-        System.assertEquals(opp.Id, dgps[0].ReferenceObject, 'DGP should be linked to Opportunity');
-    }
-}
+maica_cc__Funding_Period_Progress__c
+
+maica_cc__Funding_Period_Remaining__c
+
+maica_cc__Funding_Periods__c
+
+maica_cc__Funding_Remaining_Weeks__c
+
+maica_cc__Funding_Source__c
+
+maica_cc__Last_External_Sync__c
+
+maica_cc__Last_NDIS_Sync__c
+
+maica_cc__Living_Arrangements__c
+
+maica_cc__NDIS_Reference__c
+
+maica_cc__PACE_Funding__c
+
+maica_cc__Participant__c
+
+maica_cc__Provided_By__c
+
+maica_cc__Remaining_Amount__c
+
+maica_cc__Spent_Amount__c
+
+maica_cc__Start_Date__c
+
+maica_cc__Strengths__c
+
+maica_cc__Total_Approved_Active__c
+
+maica_cc__Total_Available_Funding_Current_Month__c
+
+maica_cc__Total_Available_Funding_Daily__c
+
+maica_cc__Total_Billable_Fees_Daily__c
+
+maica_cc__Total_Budget_Income_Daily__c
+
+maica_cc__Total_Claimable_Fees_Daily__c
+
+maica_cc__Total_Client_Contributions_Daily__c
+
+maica_cc__Total_Items__c
+
+maica_cc__Total_Remaining_Active__c
+
+maica_cc__Utilisation__c
+
+MC_Home_Care_Account_Balance__c
+
+MC_Provider_Held_Care_Recipient_Fund__c
+
+MC_Provider_Held_Commonwealth_Funds__c
+
+Name
+
+OwnerId
+
+Program_Priority__c
+
+SystemModstamp
