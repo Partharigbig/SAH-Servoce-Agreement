@@ -53,7 +53,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         Opportunity opp = null;
         List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
-                   AccountId, Funding__c, Funding_Source__c
+                   AccountId, Funding__c, Funding_Source__c, Funding_Administrator__c, Agreement_Start_Date__c,
+            Agreement_End_Date__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
@@ -70,13 +71,56 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                 SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
                        FirstName, LastName, Date_of_Birth__c, PersonContactId,
                        Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
-                       Home_Address__PostalCode__s, Home_Address__CountryCode__s
+                       Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, 
+                	   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
+                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
             ];
             if (!accRows.isEmpty()) acc = accRows[0];
         }
+        
+        // Funding Administrator Lookup (Account)
+            Account fundingAdmin = null;
+            if (opp.Funding_Administrator__c != null) {
+                fundingAdmin = [
+                    SELECT Id, Name, Phone, PersonEmail,
+                           BillingStreet, BillingCity, BillingState,
+                           BillingPostalCode, BillingCountry
+                    FROM Account
+                    WHERE Id = :opp.Funding_Administrator__c
+                    LIMIT 1
+                ];
+            }
+        
+        // --- Related: Service Agreement (latest by CreatedDate)
+        maica_cc__Service_Agreement__c sa = null;
+        List<maica_cc__Service_Agreement__c> saRows = [
+            SELECT Id,
+            Opportunity__c,
+            maica_cc__Start_Date__c,
+            maica_cc__End_Date__c,
+            maica_cc__Funding_Source__c
+            FROM maica_cc__Service_Agreement__c
+            WHERE Opportunity__c = :opp.Id
+            ORDER BY CreatedDate DESC
+            LIMIT 1
+        ];
+        if (!saRows.isEmpty()) sa = saRows[0];
+        
+        /*---------OpportunityProduct--------*/
+        List<OpportunityLineItem> oliList = [
+                SELECT Id,
+                       Quantity,
+                       UnitPrice,
+                       TotalPrice,
+                       Service_Frequency__c,
+                       Product2.Name,
+                       Product2.Support_Item__r.Name
+                FROM OpportunityLineItem
+                WHERE OpportunityId = :opp.Id
+            ];
 
         /* -------- Funding parent -------- */
         maica_cc__Funding__c funding = null;
@@ -143,6 +187,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('OppCloseDate', formatDate(opp.CloseDate));
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
+        token.put('OppAgreementStartDate', formatDate(opp.Agreement_Start_Date__c));
+		token.put('OppAgreementEndDate',   formatDate(opp.Agreement_End_Date__c));
 
         // Account
         if (acc != null) {
@@ -153,6 +199,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('AccountPhone', acc.Phone);
             token.put('AccountMobile', acc.PersonMobilePhone);
             token.put('AccountEmail', acc.PersonEmail);
+            token.put('AccountRegion', acc.Region__c);
             token.put('AccountHomeAddress',
                 formatAddress(
                     acc.Home_Address__Street__s,
@@ -162,8 +209,97 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                     acc.Home_Address__CountryCode__s
                 )
             );
+            token.put('AccountShippingAddress',
+                formatAddress(
+                    acc.ShippingStreet,
+                    acc.ShippingCity,
+                    acc.ShippingState,
+                    acc.ShippingPostalCode,
+                    acc.ShippingCountry
+                    )
+                );
+            token.put('AccountBillingAddress',
+                formatAddress(
+                    acc.BillingStreet,
+                    acc.BillingCity,
+                    acc.BillingState,
+                    acc.BillingPostalCode,
+                    acc.BillingCountry
+                    )
+                );
         }
-
+        
+        //Funding Administrator Token Mapping
+                if (fundingAdmin != null) {
+                    token.put('FundingAdminName', fundingAdmin.Name);
+                    token.put('FundingAdminEmail', fundingAdmin.PersonEmail);
+                    token.put('FundingAdminPhone', fundingAdmin.Phone);
+                 
+                    // Combine address neatly into one string
+                    String addr = '';
+                    List<String> addrParts = new List<String>{
+                        fundingAdmin.BillingStreet,
+                        fundingAdmin.BillingCity,
+                        fundingAdmin.BillingState,
+                        fundingAdmin.BillingPostalCode,
+                        fundingAdmin.BillingCountry
+                    };
+                    for (String p : addrParts) {
+                        if (!String.isBlank(p)) addr += p + ', ';
+                    }
+                    if (addr.endsWith(', ')) addr = addr.substring(0, addr.length() - 2);
+                 
+                    token.put('FundingAdminBillingAddress', addr);
+                } else {
+                    token.put('FundingAdminName', '');
+                    token.put('FundingAdminEmail', '');
+                    token.put('FundingAdminPhone', '');
+                    token.put('FundingAdminBillingAddress', '');
+                }
+        // Tokens sourced from Service Agreement (fallback to Opportunity)
+            token.put('ServiceStartDate',
+                      sa != null ? formatDate(sa.maica_cc__Start_Date__c)
+                                 : formatDate(opp.Agreement_Start_Date__c));
+             
+            token.put('ServiceEndDate',
+                      sa != null ? formatDate(sa.maica_cc__End_Date__c)
+                                 : formatDate(opp.Agreement_End_Date__c));
+             
+            token.put('SA_FundingSource',
+                      sa != null && !String.isBlank(sa.maica_cc__Funding_Source__c)
+                        ? sa.maica_cc__Funding_Source__c
+                        : opp.Funding_Source__c);
+        
+		// Product/Support Item List
+        List<Map<String, Object>> productOut = new List<Map<String, Object>>();
+        Integer pcount = 1;
+         
+        for (OpportunityLineItem oli : oliList) {
+            // Build one row for each product line
+            Map<String, Object> row = new Map<String, Object>();
+         
+            row.put('RowNumber', pcount);
+            row.put('SupportItemName',
+                (oli.Product2 != null && oli.Product2.Support_Item__r != null)
+                    ? oli.Product2.Support_Item__r.Name
+                    : (oli.Product2 != null ? oli.Product2.Name : null)
+            );
+            row.put('ServiceFrequency',
+                !String.isBlank(oli.Service_Frequency__c)
+                    ? oli.Service_Frequency__c
+                    : oli.Period_Type__c
+            );
+            row.put('Quantity', oli.Quantity);
+            row.put('UnitPrice', oli.UnitPrice);
+            row.put('TotalPrice', oli.TotalPrice);
+         
+            productOut.add(row);
+            pcount++;
+        }
+         
+        // Add this to your token map
+        token.put('ProductUnits', productOut);		
+        
         // Funding (parent)
         if (funding != null) {
             token.put('FundingName', funding.Name);
@@ -282,13 +418,13 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         }
         DocumentTemplate tmpl = tmplRows[0];
 
-        /* -------- Title naming: <AgreementKey>_<FundingSource>_<Account/Oppty>_<yyyyMMdd_HHmmss> -------- */
+        /* -------- Title naming: -------- */
 
-        String agreementKey = envKey; // shows which agreement key was used
         String who = (acc != null ? acc.Name : opp.Name);
-        String ts  = Datetime.now().format('yyyyMMdd_HHmmss');
+        String ts  = Datetime.now().format('dd/MM/yyyy_HH:mm:ss');
         String niceFS = String.isBlank(opp.Funding_Source__c) ? 'Unknown' : opp.Funding_Source__c.replace(' ', '');
-        String title = agreementKey + '_' + niceFS + '_' + sanitizeTitle(who) + '_' + ts;
+        String rawTitle = who + '_' + 'Service Agreement';
+        String title = sanitizeTitle(rawTitle);
 
         /* -------- Build DocGen request for DOCX output -------- */
 
@@ -348,11 +484,19 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         if (amt <= 15000)      return '$2001 - $15000';
         return 'Above $15000';
     }
-    private static String sanitizeTitle(String in) {
-        if (String.isBlank(in)) return 'Record';
-        // Remove characters that can’t be used in file names
-        String out = in.replaceAll('[\\\\/:*?\"<>|#%&{}$!@`~^+=]', ' ');
-        out = out.replaceAll('\\s+', '_');
-        return out.length() > 120 ? out.substring(0, 120) : out;
+    private static String sanitizeTitle(String inputStr) {
+    if (inputStr == null || inputStr.trim() == '') {
+        return 'Record';
     }
+ 
+    // Remove invalid filename characters and extra spaces
+    String clean = inputStr.replaceAll('[\\\\/:*?"<>|#%&{}$!@`~^+=]', ' ');
+    clean = clean.replaceAll('\\s+', '_');  // collapse spaces into underscores
+ 
+    // Truncate safely if too long (max 120 chars)
+    if (clean.length() > 120) {
+        clean = clean.substring(0, 120);
+    }
+    return clean;
+}
 }
