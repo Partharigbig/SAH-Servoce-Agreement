@@ -54,7 +54,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
                    AccountId, Funding__c, Funding_Source__c, Funding_Administrator__c, Agreement_Start_Date__c,
-            Agreement_End_Date__c
+            Agreement_End_Date__c, Opportunity_Owner__c, OwnerId
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
@@ -63,15 +63,27 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         if (opp == null) {
             throw new AuraHandledException('Opportunity not found for Id: ' + String.valueOf(oppId));
         }
+        
+        /* -------- Opportunity Owner (User) -------- */
+        User oppOwner = null;
+        if (opp.OwnerId != null) {
+                List<User> ownerRows = [
+                    SELECT Id, Name, Email, MobilePhone
+                    FROM User
+                    WHERE Id = :opp.OwnerId
+                    LIMIT 1
+                ];
+                if (!ownerRows.isEmpty()) oppOwner = ownerRows[0];
+        }
 
         /* -------- Account (Person Account) -------- */
         Account acc = null;
         if (opp.AccountId != null) {
             List<Account> accRows = [
-                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
+                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail, Salutation,
                        FirstName, LastName, Date_of_Birth__c, PersonContactId,
                        Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
-                       Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, 
+                       Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, maica_cc__NDIS_Number__pc, 
                 	   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
                 	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry
                 FROM Account
@@ -162,6 +174,22 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                   AND Power_of_Attorney__c != null
             ];
         }
+        
+        /* -------- ContactContactRelation (Carers only) -------- */
+        List<ContactContactRelation> ccrCarers = new List<ContactContactRelation>();
+        if (acc != null && acc.PersonContactId != null) {
+            ccrCarers = [
+                SELECT Id, RelatedContactId,
+                       RelatedContact.Name, RelatedContact.Phone, RelatedContact.Email,
+                       RelatedContact.MailingStreet, RelatedContact.MailingCity,
+                       RelatedContact.MailingState, RelatedContact.MailingPostalCode,
+                       RelatedContact.MailingCountry,
+                       Additional_responsibility__c
+                FROM ContactContactRelation
+                WHERE ContactId = :acc.PersonContactId
+                  AND Additional_responsibility__c INCLUDES ('Carer')
+            ];
+        }
 
         /* -------- Flags from Funding Items -------- */
         Boolean showPartG_AT_HM = false;
@@ -177,6 +205,43 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (bt == 'Restorative care pathway') showPartH_Restorative = true;
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
+        
+    // ===================== GROUP FUNDING ITEMS BY PART =====================
+        List<maica_cc__Funding_Item__c> grpAT = new List<maica_cc__Funding_Item__c>();
+        List<maica_cc__Funding_Item__c> grpHM = new List<maica_cc__Funding_Item__c>();
+        List<maica_cc__Funding_Item__c> grpR  = new List<maica_cc__Funding_Item__c>(); // Restorative
+        List<maica_cc__Funding_Item__c> grpI  = new List<maica_cc__Funding_Item__c>(); // End-of-life
+         
+        for (maica_cc__Funding_Item__c fi : fundingItemList) {
+            String bt = (fi.maica_cc__Budget_Type__c == null) ? '' : fi.maica_cc__Budget_Type__c.toLowerCase();
+         
+            if (bt.contains('assistive technology')) {
+                grpAT.add(fi);
+            } else if (bt.contains('home modification')) {
+                grpHM.add(fi);
+            } else if (bt.contains('restorative care')) {
+                grpR.add(fi);
+            } else if (bt.contains('end of life')) {
+                grpI.add(fi);
+            }
+        }
+         
+        // ===================== CREATE ROLLUPS PER GROUP =====================
+        PartRollup gAT = new PartRollup(grpAT);
+        PartRollup gHM = new PartRollup(grpHM);
+        PartRollup gR  = new PartRollup(grpR);
+        PartRollup gI  = new PartRollup(grpI);
+    
+        /* -------- Approved Services (child of Funding) -------- */
+        List<maica_cc__Approved_Service__c> approvedServices = new List<maica_cc__Approved_Service__c>();
+            if (funding != null) {
+                approvedServices = [
+                    SELECT Id, Name
+                    FROM maica_cc__Approved_Service__c
+                    WHERE maica_cc__Funding__c = :funding.Id
+                    ORDER BY CreatedDate ASC
+                ];
+            }
 
         /* -------- Tokens -------- */
         Map<String, Object> token = new Map<String, Object>();
@@ -187,12 +252,25 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('OppCloseDate', formatDate(opp.CloseDate));
         token.put('OppAmount', formatCurrency(opp.Amount));
         token.put('FundingSource', opp.Funding_Source__c);
+        token.put('OppOwner', opp.Opportunity_Owner__c);
         token.put('OppAgreementStartDate', formatDate(opp.Agreement_Start_Date__c));
 		token.put('OppAgreementEndDate',   formatDate(opp.Agreement_End_Date__c));
+        
+        // Opportunity Owner (User)
+        if (oppOwner != null) {
+            token.put('OppOwner', oppOwner.Name);
+            token.put('UserEmail', oppOwner.Email);
+            token.put('UserMobilePhone', oppOwner.MobilePhone);
+        } else {
+            token.put('OppOwner', '');
+            token.put('UserEmail', '');
+            token.put('UserMobilePhone', '');
+        }
 
         // Account
         if (acc != null) {
             token.put('AccountName', acc.Name);
+            token.put('AccountTitle', acc.Salutation);
             token.put('AccountFirstName', acc.FirstName);
             token.put('AccountLastName', acc.LastName);
             token.put('AccountDOB', formatDate(acc.Date_of_Birth__c));
@@ -200,6 +278,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('AccountMobile', acc.PersonMobilePhone);
             token.put('AccountEmail', acc.PersonEmail);
             token.put('AccountRegion', acc.Region__c);
+            token.put('AccountNDISNumber', acc.maica_cc__NDIS_Number__pc);
             token.put('AccountHomeAddress',
                 formatAddress(
                     acc.Home_Address__Street__s,
@@ -332,6 +411,31 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             ccrOut.add(row);
         }
         token.put('CCRList', ccrOut);
+        
+        /* -------- Tokens: CCR Carers list -------- */
+        List<Map<String, Object>> carerOut = new List<Map<String, Object>>();
+        Integer carerIdx = 1;
+                for (ContactContactRelation ccr : ccrCarers) {
+                    Map<String, Object> row = new Map<String, Object>();
+                    row.put('RowNumber', carerIdx++);
+                    row.put('RelatedContactName', ccr.RelatedContact != null ? ccr.RelatedContact.Name : null);
+                    row.put('RelatedContactPhone', ccr.RelatedContact != null ? ccr.RelatedContact.Phone : null);
+                    row.put('RelatedContactEmail', ccr.RelatedContact != null ? ccr.RelatedContact.Email : null);
+                    row.put('RelatedContactAddress',
+                        ccr.RelatedContact != null
+                        ? formatAddress(
+                              ccr.RelatedContact.MailingStreet,
+                              ccr.RelatedContact.MailingCity,
+                              ccr.RelatedContact.MailingState,
+                              ccr.RelatedContact.MailingPostalCode,
+                              ccr.RelatedContact.MailingCountry
+                          )
+                        : null
+                    );
+            carerOut.add(row);
+        }
+        token.put('CarerCCRList', carerOut);                 // repeating block data
+        token.put('showCarerCCRs', !carerOut.isEmpty());     // optional boolean to toggle section
 
         // Funding Items list
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
@@ -364,7 +468,63 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('showPartG_AT_HM',        showPartG_AT_HM);
         token.put('showPartH_Restorative',  showPartH_Restorative);
         token.put('showPartI_EndOfLife',    showPartI_EndOfLife);
-
+        
+       // Buckets (separate AT and HM for Part G) 
+		/* ===================== PART G: AT (Assistive Technology) ===================== */
+        token.put('AT_StartDate',     gAT.minStart == null ? '' : formatDate(gAT.minStart));
+        token.put('AT_EndDate',       gAT.maxEnd   == null ? '' : formatDate(gAT.maxEnd));
+        token.put('AT_ApprovedAmount', gAT.totalApproved == null ? '' : formatCurrency(gAT.totalApproved));
+        token.put('AT_FundingTier',   classifyTier(gAT.totalApproved));    // optional text display
+         
+        // AT tier checkboxes (use these tokens in the four checkboxes)
+        token.put('AT_Tier_500',    renderBox(gAT.totalApproved != null && gAT.totalApproved <= 500));
+        token.put('AT_Tier_2000',   renderBox(gAT.totalApproved != null && gAT.totalApproved > 500   && gAT.totalApproved <= 2000));
+        token.put('AT_Tier_15000',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 2000  && gAT.totalApproved <= 15000));
+        token.put('AT_Tier_Other',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 15000));
+         
+        /* ===================== PART G: HM (Home Modifications) ===================== */
+        token.put('HM_StartDate',     gHM.minStart == null ? '' : formatDate(gHM.minStart));
+        token.put('HM_EndDate',       gHM.maxEnd   == null ? '' : formatDate(gHM.maxEnd));
+        token.put('HM_ApprovedAmount', gHM.totalApproved == null ? '' : formatCurrency(gHM.totalApproved));
+        token.put('HM_FundingTier',   classifyTier(gHM.totalApproved));    // optional text display
+         
+        // HM tier checkboxes (use these tokens in the four checkboxes)
+        token.put('HM_Tier_500',    renderBox(gHM.totalApproved != null && gHM.totalApproved <= 500));
+        token.put('HM_Tier_2000',   renderBox(gHM.totalApproved != null && gHM.totalApproved > 500   && gHM.totalApproved <= 2000));
+        token.put('HM_Tier_15000',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 2000  && gHM.totalApproved <= 15000));
+        token.put('HM_Tier_Other',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 15000));
+         
+        /* ===================== PART H: Restorative Care ===================== */
+        token.put('Restorative_StartDate',     gR.minStart == null ? '' : formatDate(gR.minStart));
+        token.put('Restorative_EndDate',       gR.maxEnd   == null ? '' : formatDate(gR.maxEnd));
+        token.put('Restorative_ApprovedAmount', gR.totalApproved == null ? '' : formatCurrency(gR.totalApproved));
+        token.put('Restorative_Tier',          classifyTier(gR.totalApproved));
+         
+        /* ===================== PART I: End-of-Life Care ===================== */
+        token.put('EOL_StartDate',     gI.minStart == null ? '' : formatDate(gI.minStart));
+        token.put('EOL_EndDate',       gI.maxEnd   == null ? '' : formatDate(gI.maxEnd));
+        token.put('EOL_ApprovedAmount', gI.totalApproved == null ? '' : formatCurrency(gI.totalApproved));
+        token.put('EOL_Tier',          classifyTier(gI.totalApproved));
+        
+        /* -------- Tokens: Approved Services -------- */
+		List<String> approvedServiceIds = new List<String>();
+ 
+            if (!approvedServices.isEmpty()) {
+                Integer asIdx = 1;
+                for (maica_cc__Approved_Service__c asRec : approvedServices) {
+                    // Add Auto Number ID (Name) to the list
+                    approvedServiceIds.add(asIdx + '. ' + asRec.Name);
+                    asIdx++;
+                }
+            }
+             
+            // Build one combined formatted string for DocGen
+            // Each item appears on a new line
+            String approvedServiceListStr = String.join(approvedServiceIds, '\n');
+             
+            //Add to main token map
+            token.put('ApprovedServiceList', approvedServiceListStr);
+                    
         /* -------- Resolve which DOCX to use (ContentVersionId) via ENV -------- */
 
         // Allow direct override from Flow (rare)
@@ -446,7 +606,33 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     /* ================= Helpers ================= */
-
+    // Render a “checkbox” using Unicode (DocGen-friendly)
+    private static String renderBox(Boolean b) {
+        return (b == true ? '☒' : '☐');
+    }
+    // Roll-up of min start, max end, and total approved for a set of Funding Items
+    private class PartRollup {
+        public Date    minStart;
+        public Date    maxEnd;
+        public Decimal totalApproved;
+        
+        public PartRollup(List<maica_cc__Funding_Item__c> items) {
+            for (maica_cc__Funding_Item__c x : items) {
+                if (x.maica_cc__Start_Date__c != null &&
+                    (minStart == null || x.maica_cc__Start_Date__c < minStart)) {
+                        minStart = x.maica_cc__Start_Date__c;
+                    }
+                if (x.maica_cc__End_Date__c != null &&
+                    (maxEnd == null || x.maica_cc__End_Date__c > maxEnd)) {
+                        maxEnd = x.maica_cc__End_Date__c;
+                    }
+                if (x.maica_cc__Approved_Amount__c != null) {
+                    totalApproved = (totalApproved == null ? 0 : totalApproved)
+                        + x.maica_cc__Approved_Amount__c;
+                }
+            }
+        }
+    }
     /** Read Environment_Variables__mdt by DeveloperName and return map<DeveloperName, Value__c> */
     private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
         Map<String,String> out = new Map<String,String>();
@@ -488,7 +674,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     if (inputStr == null || inputStr.trim() == '') {
         return 'Record';
     }
- 
     // Remove invalid filename characters and extra spaces
     String clean = inputStr.replaceAll('[\\\\/:*?"<>|#%&{}$!@`~^+=]', ' ');
     clean = clean.replaceAll('\\s+', '_');  // collapse spaces into underscores
