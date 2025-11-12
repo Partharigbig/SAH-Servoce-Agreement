@@ -54,7 +54,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
                    AccountId, Funding__c, Funding_Source__c, Funding_Administrator__c, Agreement_Start_Date__c,
-            Agreement_End_Date__c, Opportunity_Owner__c
+            Agreement_End_Date__c, Opportunity_Owner__c, OwnerId, Transfer_from_another_provider__c, Previous_Service_Exit_Date__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
@@ -80,12 +80,12 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         Account acc = null;
         if (opp.AccountId != null) {
             List<Account> accRows = [
-                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail,
-                       FirstName, LastName, Date_of_Birth__c, PersonContactId,
+                SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail, Salutation,
+                       FirstName, LastName, Date_of_Birth__c, PersonContactId, Description,
                        Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
                        Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, maica_cc__NDIS_Number__pc, 
                 	   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry
+                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry, Payment_Method__c	
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
@@ -206,6 +206,57 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             if (bt == 'End of life pathway')      showPartI_EndOfLife  = true;
         }
         
+    // ===================== GROUP FUNDING ITEMS BY PART =====================
+        List<maica_cc__Funding_Item__c> grpAT = new List<maica_cc__Funding_Item__c>();
+        List<maica_cc__Funding_Item__c> grpHM = new List<maica_cc__Funding_Item__c>();
+        List<maica_cc__Funding_Item__c> grpR  = new List<maica_cc__Funding_Item__c>(); // Restorative
+        List<maica_cc__Funding_Item__c> grpI  = new List<maica_cc__Funding_Item__c>(); // End-of-life
+         
+        for (maica_cc__Funding_Item__c fi : fundingItemList) {
+            String bt = (fi.maica_cc__Budget_Type__c == null) ? '' : fi.maica_cc__Budget_Type__c.toLowerCase();
+         
+            if (bt.contains('assistive technology')) {
+                grpAT.add(fi);
+            } else if (bt.contains('home modification')) {
+                grpHM.add(fi);
+            } else if (bt.contains('restorative care')) {
+                grpR.add(fi);
+            } else if (bt.contains('end of life')) {
+                grpI.add(fi);
+            }
+        }
+         
+        // ===================== CREATE ROLLUPS PER GROUP =====================
+        PartRollup gAT = new PartRollup(grpAT);
+        PartRollup gHM = new PartRollup(grpHM);
+        PartRollup gR  = new PartRollup(grpR);
+        PartRollup gI  = new PartRollup(grpI);
+        
+        Set<Id> atFiIds = new Set<Id>();
+        Set<Id> hmFiIds = new Set<Id>();
+        for (maica_cc__Funding_Item__c fi : grpAT) atFiIds.add(fi.Id);
+        for (maica_cc__Funding_Item__c fi : grpHM) hmFiIds.add(fi.Id);
+         
+        // Pull Entitlements linked to those Funding Items
+        List<maica_cc__Entitlement__c> entRows = new List<maica_cc__Entitlement__c>();
+        if (!atFiIds.isEmpty() || !hmFiIds.isEmpty()) {
+            entRows = [
+                SELECT Id, Name, maica_cc__Approved_Amount__c, maica_cc__Funding_Item__c
+                FROM maica_cc__Entitlement__c
+                WHERE maica_cc__Funding_Item__c IN :atFiIds OR maica_cc__Funding_Item__c IN :hmFiIds
+                ORDER BY CreatedDate ASC
+            ];
+        }
+         
+        // Index entitlements by Funding Item Id
+        Map<Id, List<maica_cc__Entitlement__c>> entsByFI = new Map<Id, List<maica_cc__Entitlement__c>>();
+        for (maica_cc__Entitlement__c e : entRows) {
+            if (!entsByFI.containsKey(e.maica_cc__Funding_Item__c)) {
+                entsByFI.put(e.maica_cc__Funding_Item__c, new List<maica_cc__Entitlement__c>());
+            }
+            entsByFI.get(e.maica_cc__Funding_Item__c).add(e);
+        }
+    
         /* -------- Approved Services (child of Funding) -------- */
         List<maica_cc__Approved_Service__c> approvedServices = new List<maica_cc__Approved_Service__c>();
             if (funding != null) {
@@ -229,6 +280,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('OppOwner', opp.Opportunity_Owner__c);
         token.put('OppAgreementStartDate', formatDate(opp.Agreement_Start_Date__c));
 		token.put('OppAgreementEndDate',   formatDate(opp.Agreement_End_Date__c));
+        token.put('OppTFromAnotherProv', opp.Transfer_from_another_provider__c);
+        token.put('OppPrevservExitDate', formatDate(opp.Previous_Service_Exit_Date__c));
         
         // Opportunity Owner (User)
         if (oppOwner != null) {
@@ -244,6 +297,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         // Account
         if (acc != null) {
             token.put('AccountName', acc.Name);
+            token.put('AccountTitle', acc.Salutation);
             token.put('AccountFirstName', acc.FirstName);
             token.put('AccountLastName', acc.LastName);
             token.put('AccountDOB', formatDate(acc.Date_of_Birth__c));
@@ -252,6 +306,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('AccountEmail', acc.PersonEmail);
             token.put('AccountRegion', acc.Region__c);
             token.put('AccountNDISNumber', acc.maica_cc__NDIS_Number__pc);
+            token.put('AccountDescription', acc.Description);
+            token.put('AccountPaymentMeth',acc.Payment_Method__c);
             token.put('AccountHomeAddress',
                 formatAddress(
                     acc.Home_Address__Street__s,
@@ -321,6 +377,12 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                       sa != null && !String.isBlank(sa.maica_cc__Funding_Source__c)
                         ? sa.maica_cc__Funding_Source__c
                         : opp.Funding_Source__c);
+        	Date baseStart = (sa != null && sa.maica_cc__Start_Date__c != null)
+            ? sa.maica_cc__Start_Date__c
+            : opp.Agreement_Start_Date__c;
+        	Date serviceReviewDate = (baseStart != null) ? baseStart.addMonths(12) : null;
+            token.put('ServiceReviewDate',
+                serviceReviewDate == null ? '' : formatDate(serviceReviewDate));
         
 		// Product/Support Item List
         List<Map<String, Object>> productOut = new List<Map<String, Object>>();
@@ -442,6 +504,117 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('showPartH_Restorative',  showPartH_Restorative);
         token.put('showPartI_EndOfLife',    showPartI_EndOfLife);
         
+       // Buckets (separate AT and HM for Part G) 
+		/* ===================== PART G: AT (Assistive Technology) ===================== */
+        token.put('AT_StartDate',     gAT.minStart == null ? '' : formatDate(gAT.minStart));
+        token.put('AT_EndDate',       gAT.maxEnd   == null ? '' : formatDate(gAT.maxEnd));
+        token.put('AT_ApprovedAmount', gAT.totalApproved == null ? '' : formatCurrency(gAT.totalApproved));
+        token.put('AT_FundingTier',   classifyTier(gAT.totalApproved));    // optional text display
+         
+        // AT tier checkboxes (use these tokens in the four checkboxes)
+        token.put('AT_Tier_500',    renderBox(gAT.totalApproved != null && gAT.totalApproved <= 500));
+        token.put('AT_Tier_2000',   renderBox(gAT.totalApproved != null && gAT.totalApproved > 500   && gAT.totalApproved <= 2000));
+        token.put('AT_Tier_15000',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 2000  && gAT.totalApproved <= 15000));
+        token.put('AT_Tier_Other',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 15000));
+         
+        /* ===================== PART G: HM (Home Modifications) ===================== */
+        token.put('HM_StartDate',     gHM.minStart == null ? '' : formatDate(gHM.minStart));
+        token.put('HM_EndDate',       gHM.maxEnd   == null ? '' : formatDate(gHM.maxEnd));
+        token.put('HM_ApprovedAmount', gHM.totalApproved == null ? '' : formatCurrency(gHM.totalApproved));
+        token.put('HM_FundingTier',   classifyTier(gHM.totalApproved));    // optional text display
+         
+        // HM tier checkboxes (use these tokens in the four checkboxes)
+        token.put('HM_Tier_500',    renderBox(gHM.totalApproved != null && gHM.totalApproved <= 500));
+        token.put('HM_Tier_2000',   renderBox(gHM.totalApproved != null && gHM.totalApproved > 500   && gHM.totalApproved <= 2000));
+        token.put('HM_Tier_15000',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 2000  && gHM.totalApproved <= 15000));
+        token.put('HM_Tier_Other',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 15000));
+         
+        /* ===================== PART H: Restorative Care ===================== */
+        token.put('Restorative_StartDate',     gR.minStart == null ? '' : formatDate(gR.minStart));
+        token.put('Restorative_EndDate',       gR.maxEnd   == null ? '' : formatDate(gR.maxEnd));
+        token.put('Restorative_ApprovedAmount', gR.totalApproved == null ? '' : formatCurrency(gR.totalApproved));
+        token.put('Restorative_Tier',          classifyTier(gR.totalApproved));
+        token.put('Restorative_Tier_6000', renderBox(gR.totalApproved != null && gR.totalApproved <= 6000));
+        token.put('Restorative_Tier_Other', renderBox(gR.totalApproved != null && gR.totalApproved > 6000));
+       /* ===================== PART H: Services to be delivered (Entitlements Table) ===================== */
+        List<Map<String,Object>> restorativeRows = new List<Map<String,Object>>();
+        Integer rIdx = 1;
+         
+        // 1) Collect restorative Funding Item Ids
+        Set<Id> rFiIds = new Set<Id>();
+        for (maica_cc__Funding_Item__c fi : grpR) rFiIds.add(fi.Id);
+         
+        // 2) Query all entitlements in one SOQL and bucket by Funding Item
+        if (!rFiIds.isEmpty()) {
+            for (maica_cc__Entitlement__c e : [
+                SELECT Id, Name, maica_cc__Approved_Amount__c, maica_cc__Funding_Item__c
+                FROM maica_cc__Entitlement__c
+                WHERE maica_cc__Funding_Item__c IN :rFiIds
+            ]) {
+                List<maica_cc__Entitlement__c> bucket = entsByFi.get(e.maica_cc__Funding_Item__c);
+                if (bucket == null) {
+                    bucket = new List<maica_cc__Entitlement__c>();
+                    entsByFi.put(e.maica_cc__Funding_Item__c, bucket);
+                }
+                bucket.add(e);
+            }
+        }
+        // 3) Build table rows
+        for (maica_cc__Funding_Item__c fi : grpR) {
+                    List<maica_cc__Entitlement__c> entList = entsByFi.get(fi.Id);
+                    if (entList == null) continue;
+                    
+                    for (maica_cc__Entitlement__c ent : entList) {
+                        Map<String,Object> row = new Map<String,Object>();
+                        row.put('RowNumber', rIdx++);
+                        row.put('EntitlementName', ent.Name);
+                        row.put('Frequency', '');
+                        row.put('ExpectedDates', '');
+                        row.put('AssociatedProvider', '');
+                        row.put('Price_Display', formatCurrency(ent.maica_cc__Approved_Amount__c));
+                        restorativeRows.add(row);
+                    }
+                }
+         
+        token.put('Restorative_Services', restorativeRows);
+        token.put('showRestorativeServices', !restorativeRows.isEmpty());
+ 
+        /* ===================== PART I: End-of-Life Care ===================== */
+        token.put('EOL_StartDate',     gI.minStart == null ? '' : formatDate(gI.minStart));
+        token.put('EOL_EndDate',       gI.maxEnd   == null ? '' : formatDate(gI.maxEnd));
+        token.put('EOL_ApprovedAmount', gI.totalApproved == null ? '' : formatCurrency(gI.totalApproved));
+        token.put('EOL_Tier',          classifyTier(gI.totalApproved));
+        
+        // ============== AT entitlements table ==============
+        List<Map<String,Object>> AT_Entitlements = new List<Map<String,Object>>();
+        Decimal atEntTotal = 0;
+        for (maica_cc__Funding_Item__c fi : grpAT) {
+            for (maica_cc__Entitlement__c e : entsByFI.get(fi.Id)) {
+                Map<String,Object> row = new Map<String,Object>();
+                row.put('EntitlementName', e.Name);
+                row.put('Approved_Amount_Display', formatCurrency(e.maica_cc__Approved_Amount__c));
+                AT_Entitlements.add(row);
+                if (e.maica_cc__Approved_Amount__c != null) atEntTotal += e.maica_cc__Approved_Amount__c;
+            }
+        }
+        token.put('AT_Entitlements', AT_Entitlements);
+        token.put('AT_Entitlements_Total', formatCurrency(atEntTotal));
+         
+        // ============== HM entitlements table ==============
+        List<Map<String,Object>> HM_Entitlements = new List<Map<String,Object>>();
+        Decimal hmEntTotal = 0;
+        for (maica_cc__Funding_Item__c fi : grpHM) {
+            for (maica_cc__Entitlement__c e : entsByFI.get(fi.Id)) {
+                Map<String,Object> row = new Map<String,Object>();
+                row.put('EntitlementName', e.Name);
+                row.put('Approved_Amount_Display', formatCurrency(e.maica_cc__Approved_Amount__c));
+                HM_Entitlements.add(row);
+                if (e.maica_cc__Approved_Amount__c != null) hmEntTotal += e.maica_cc__Approved_Amount__c;
+            }
+        }
+        token.put('HM_Entitlements', HM_Entitlements);
+        token.put('HM_Entitlements_Total', formatCurrency(hmEntTotal));
+        
         /* -------- Tokens: Approved Services -------- */
 		List<String> approvedServiceIds = new List<String>();
  
@@ -519,7 +692,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         String who = (acc != null ? acc.Name : opp.Name);
         String ts  = Datetime.now().format('dd/MM/yyyy_HH:mm:ss');
         String niceFS = String.isBlank(opp.Funding_Source__c) ? 'Unknown' : opp.Funding_Source__c.replace(' ', '');
-        String rawTitle = who + '_' + 'Service Agreement';
+        String rawTitle = who + '_' + niceFS + '_' + 'Service Agreement';
         String title = sanitizeTitle(rawTitle);
 
         /* -------- Build DocGen request for DOCX output -------- */
@@ -542,7 +715,33 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     /* ================= Helpers ================= */
-
+    // Render a “checkbox” using Unicode (DocGen-friendly)
+    private static String renderBox(Boolean b) {
+        return (b == true ? '☒' : '☐');
+    }
+    // Roll-up of min start, max end, and total approved for a set of Funding Items
+    private class PartRollup {
+        public Date    minStart;
+        public Date    maxEnd;
+        public Decimal totalApproved;
+        
+        public PartRollup(List<maica_cc__Funding_Item__c> items) {
+            for (maica_cc__Funding_Item__c x : items) {
+                if (x.maica_cc__Start_Date__c != null &&
+                    (minStart == null || x.maica_cc__Start_Date__c < minStart)) {
+                        minStart = x.maica_cc__Start_Date__c;
+                    }
+                if (x.maica_cc__End_Date__c != null &&
+                    (maxEnd == null || x.maica_cc__End_Date__c > maxEnd)) {
+                        maxEnd = x.maica_cc__End_Date__c;
+                    }
+                if (x.maica_cc__Approved_Amount__c != null) {
+                    totalApproved = (totalApproved == null ? 0 : totalApproved)
+                        + x.maica_cc__Approved_Amount__c;
+                }
+            }
+        }
+    }
     /** Read Environment_Variables__mdt by DeveloperName and return map<DeveloperName, Value__c> */
     private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
         Map<String,String> out = new Map<String,String>();
@@ -584,7 +783,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     if (inputStr == null || inputStr.trim() == '') {
         return 'Record';
     }
- 
     // Remove invalid filename characters and extra spaces
     String clean = inputStr.replaceAll('[\\\\/:*?"<>|#%&{}$!@`~^+=]', ' ');
     clean = clean.replaceAll('\\s+', '_');  // collapse spaces into underscores
