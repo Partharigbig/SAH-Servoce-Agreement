@@ -1,4 +1,195 @@
-private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
+public without sharing class MC_IncomeSelfDeclarationDocGen {
+
+    public class Wrapper {
+        @InvocableVariable(required=true)
+        public List<Id> recordIds;                 // Income_Self_Declaration__c Id(s)
+        @InvocableVariable public String docTemplateName;
+        @InvocableVariable public String templateContentVersionId;
+        @InvocableVariable public String envContentDocVarName;
+        @InvocableVariable public String envTemplateNameVarName;
+    }
+
+    @InvocableMethod(label='Generate Income Self Declaration Document')
+    public static void generateFromFlow(List<Wrapper> inputs) {
+        if (inputs == null || inputs.isEmpty() || inputs[0] == null ||
+            inputs[0].recordIds == null || inputs[0].recordIds.isEmpty()) {
+            throw new AuraHandledException('No Income Self Declaration Id provided.');
+        }
+        process(inputs[0]);
+    }
+
+    // Default document template name (change if you use a different template name)
+    private static final String DEFAULT_TEMPLATE_NAME = 'IncomeSelfDeclarationTemplate';
+    // ENV DeveloperName default
+    private static final String ENV_CONTENT_DEVNAME = 'INCOME_SELF_DECLARATION_ContentId';
+
+    private static void process(Wrapper w) {
+        Id recId = w.recordIds[0];
+
+        // Query the Income_Self_Declaration__c record (all fields you listed)
+        Income_Self_Declaration__c rec = [
+            SELECT
+                Id, Name, FullName__c, Address__c, Case__c, Couple_High__c, Couple_Low__c, Couple_Medium__c,
+                Date__c,
+                Expenditure_Equipment_ST__c, Expenditure_Equipment__c,
+                Expenditure_Health_Insurance_ST__c, Expenditure_Health_Insurance__c,
+                Expenditure_Medical_Supplies_ST__c, Expenditure_Medical_Supplies__c,
+                Expenditure_Medication_ShortTerm__c, Expenditure_Medication__c,
+                Expenditure_Other_Services_ST__c, Expenditure_Other_Services__c,
+                Expenditure_Other_ST__c, Expenditure_Other__c,
+                Expenditure_Property_Cost_ST__c, Expenditure_Property_Cost__c,
+                Expenditure_School_Costs_ST__c, Expenditure_School_Costs__c,
+                Expenditure_Specialist_Care_ST__c, Expenditure_Specialist_Care__c,
+                Expenditure_Specialist_Travel_ST__c, Expenditure_Specialist_Travel__c,
+                Expenditure_Special_Clothing_ST__c, Expenditure_Special_Clothing__c,
+                Expenditure_Special_Foods_ST__c, Expenditure_Special_Foods__c,
+                Expenditure_Temporary_Care_ST__c, Expenditure_Temporary_Care__c,
+                Expenditure_Transport_ST__c, Expenditure_Transport__c,
+                Expenditure_Utilities_ST__c, Expenditure_Utilities__c,
+                Family_with_One_Child_High__c, Family_with_One_Child_Low__c, Family_with_One_Child_Medium__c,
+                Health_Care_Card_Low__c, Individual_High__c, Individual_Low__c, Individual_Medium__c,
+                Pension_Low__c, Phone__c, Your_Service_Provider__c, Your_Signature__c, OwnerId
+            FROM Income_Self_Declaration__c
+            WHERE Id = :recId
+            LIMIT 1
+        ];
+
+        if (rec == null) {
+            throw new AuraHandledException('Income Self Declaration record not found for Id: ' + String.valueOf(recId));
+        }
+
+        // Build token map (one token per field). Use token keys matching your Word template placeholders.
+        Map<String, Object> token = new Map<String, Object>();
+
+        // Basic identity
+        token.put('Id', rec.Id);
+        token.put('Name', rec.Name);
+        token.put('FullName', rec.FullName__c);
+        token.put('Address', rec.Address__c);
+        token.put('Case', rec.Case__c);
+        token.put('Date', formatDate(rec.Date__c));
+        token.put('Phone', rec.Phone__c);
+        token.put('YourServiceProvider', rec.Your_Service_Provider__c);
+        token.put('YourSignature', rec.Your_Signature__c);
+
+        // Couple/Individual/family fields
+        token.put('Couple_High', rec.Couple_High__c);
+        token.put('Couple_Medium', rec.Couple_Medium__c);
+        token.put('Couple_Low', rec.Couple_Low__c);
+        token.put('Individual_High', rec.Individual_High__c);
+        token.put('Individual_Medium', rec.Individual_Medium__c);
+        token.put('Individual_Low', rec.Individual_Low__c);
+        token.put('Family_One_Child_High', rec.Family_with_One_Child_High__c);
+        token.put('Family_One_Child_Medium', rec.Family_with_One_Child_Medium__c);
+        token.put('Family_One_Child_Low', rec.Family_with_One_Child_Low__c);
+
+        // Health care / pension fields
+        token.put('Health_Care_Card_Low', rec.Health_Care_Card_Low__c);
+        token.put('Pension_Low', rec.Pension_Low__c);
+
+        // Expenditure fields (short term + ongoing)
+        token.put('Expenditure_Equipment_ST', formatCurrency(rec.Expenditure_Equipment_ST__c));
+        token.put('Expenditure_Equipment', formatCurrency(rec.Expenditure_Equipment__c));
+        token.put('Expenditure_Health_Insurance_ST', formatCurrency(rec.Expenditure_Health_Insurance_ST__c));
+        token.put('Expenditure_Health_Insurance', formatCurrency(rec.Expenditure_Health_Insurance__c));
+        token.put('Expenditure_Medical_Supplies_ST', formatCurrency(rec.Expenditure_Medical_Supplies_ST__c));
+        token.put('Expenditure_Medical_Supplies', formatCurrency(rec.Expenditure_Medical_Supplies__c));
+        token.put('Expenditure_Medication_ShortTerm', formatCurrency(rec.Expenditure_Medication_ShortTerm__c));
+        token.put('Expenditure_Medication', formatCurrency(rec.Expenditure_Medication__c));
+        token.put('Expenditure_Other_Services_ST', formatCurrency(rec.Expenditure_Other_Services_ST__c));
+        token.put('Expenditure_Other_Services', formatCurrency(rec.Expenditure_Other_Services__c));
+        token.put('Expenditure_Other_ST', formatCurrency(rec.Expenditure_Other_ST__c));
+        token.put('Expenditure_Other', formatCurrency(rec.Expenditure_Other__c));
+        token.put('Expenditure_Property_Cost_ST', formatCurrency(rec.Expenditure_Property_Cost_ST__c));
+        token.put('Expenditure_Property_Cost', formatCurrency(rec.Expenditure_Property_Cost__c));
+        token.put('Expenditure_School_Costs_ST', formatCurrency(rec.Expenditure_School_Costs_ST__c));
+        token.put('Expenditure_School_Costs', formatCurrency(rec.Expenditure_School_Costs__c));
+        token.put('Expenditure_Specialist_Care_ST', formatCurrency(rec.Expenditure_Specialist_Care_ST__c));
+        token.put('Expenditure_Specialist_Care', formatCurrency(rec.Expenditure_Specialist_Care__c));
+        token.put('Expenditure_Specialist_Travel_ST', formatCurrency(rec.Expenditure_Specialist_Travel_ST__c));
+        token.put('Expenditure_Specialist_Travel', formatCurrency(rec.Expenditure_Specialist_Travel__c));
+        token.put('Expenditure_Special_Clothing_ST', formatCurrency(rec.Expenditure_Special_Clothing_ST__c));
+        token.put('Expenditure_Special_Clothing', formatCurrency(rec.Expenditure_Special_Clothing__c));
+        token.put('Expenditure_Special_Foods_ST', formatCurrency(rec.Expenditure_Special_Foods_ST__c));
+        token.put('Expenditure_Special_Foods', formatCurrency(rec.Expenditure_Special_Foods__c));
+        token.put('Expenditure_Temporary_Care_ST', formatCurrency(rec.Expenditure_Temporary_Care_ST__c));
+        token.put('Expenditure_Temporary_Care', formatCurrency(rec.Expenditure_Temporary_Care__c));
+        token.put('Expenditure_Transport_ST', formatCurrency(rec.Expenditure_Transport_ST__c));
+        token.put('Expenditure_Transport', formatCurrency(rec.Expenditure_Transport__c));
+        token.put('Expenditure_Utilities_ST', formatCurrency(rec.Expenditure_Utilities_ST__c));
+        token.put('Expenditure_Utilities', formatCurrency(rec.Expenditure_Utilities__c));
+
+        // Owner and meta
+        token.put('OwnerId', rec.OwnerId);
+        token.put('RecordLink', URL.getSalesforceBaseUrl().toExternalForm() + '/' + rec.Id);
+
+        // ------------- determine which ContentVersion to use -------------
+        String contentVersionId = w.templateContentVersionId;
+
+        String envKey = !String.isBlank(w.envContentDocVarName) ? w.envContentDocVarName : ENV_CONTENT_DEVNAME;
+        Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envKey });
+        String contentDocumentIdStr = envMap.get(envKey);
+
+        if (String.isBlank(contentVersionId)) {
+            if (String.isBlank(contentDocumentIdStr)) {
+                throw new AuraHandledException('No Environment Variable found for ' + envKey + ' (Value__c should be a ContentDocumentId).');
+            }
+            Id contentDocumentId = (Id) contentDocumentIdStr;
+            List<ContentVersion> cv = [
+                SELECT Id
+                FROM ContentVersion
+                WHERE ContentDocumentId = :contentDocumentId
+                ORDER BY VersionNumber DESC NULLS LAST
+                LIMIT 1
+            ];
+            if (cv.isEmpty()) {
+                throw new AuraHandledException('No ContentVersion found for ContentDocumentId ' + contentDocumentIdStr);
+            }
+            contentVersionId = cv[0].Id;
+        }
+
+        // Resolve DocumentTemplate
+        String templateName = !String.isBlank(w.docTemplateName)
+                              ? w.docTemplateName
+                              : (!String.isBlank(w.envTemplateNameVarName)
+                                    ? getEnvValuesByNames(new Set<String>{ w.envTemplateNameVarName }).get(w.envTemplateNameVarName)
+                                    : DEFAULT_TEMPLATE_NAME);
+
+        List<DocumentTemplate> tmplRows = [
+            SELECT Id, Name
+            FROM DocumentTemplate
+            WHERE Name = :templateName AND IsActive = true
+            LIMIT 1
+        ];
+        if (tmplRows.isEmpty()) {
+            throw new AuraHandledException('Active DocumentTemplate not found for Name: ' + templateName);
+        }
+        DocumentTemplate tmpl = tmplRows[0];
+
+        // Build a title (sanitised)
+        String who = (rec.FullName__c != null ? rec.FullName__c : rec.Name);
+        String ts  = Datetime.now().format('dd/MM/yyyy_HH:mm:ss');
+        String rawTitle = who + '_' + 'IncomeSelfDeclaration_' + ts;
+        String title = sanitizeTitle(rawTitle);
+
+        Map<String, Object> req = new Map<String, Object>{
+            'templateContentVersionId' => contentVersionId,
+            'title'                    => title,
+            'keepIntermediate'         => false
+        };
+
+        DocumentGenerationProcess dgp = new DocumentGenerationProcess();
+        dgp.Type                 = 'Generate';
+        dgp.RequestText          = JSON.serialize(req);
+        dgp.ReferenceObject      = rec.Id;                // attach to this Income_Self_Declaration__c record
+        dgp.TokenData            = JSON.serialize(token);
+        dgp.DocGenApiVersionType = 'Advanced';
+        dgp.DocumentTemplateId   = tmpl.Id;
+
+        if (!Test.isRunningTest()) insert dgp;
+    }
+
+    private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
         Map<String,String> out = new Map<String,String>();
         if (developerNames == null || developerNames.isEmpty()) return out;
         for (Environment_Variables__mdt ev :
