@@ -1,4 +1,28 @@
- Address__c,Case__c,Couple_High__c,Couple_Low__c,Couple_Medium__c,Date__c,Expenditure_Equipment_ST__c,Expenditure_Equipment__c,Expenditure_Health_Insurance_ST__c,Expenditure_Health_Insurance__c,Expenditure_Medical_Supplies_ST__c,Expenditure_Medical_Supplies__c,Expenditure_Medication_ShortTerm__c,Expenditure_Medication__c,Expenditure_Other_Services_ST__c,Expenditure_Other_Services__c,Expenditure_Other_ST__c,Expenditure_Other__c,Expenditure_Property_Cost_ST__c,Expenditure_Property_Cost__c,Expenditure_School_Costs_ST__c,Expenditure_School_Costs__c,Expenditure_Specialist_Care_ST__c,Expenditure_Specialist_Care__c,Expenditure_Specialist_Travel_ST__c,Expenditure_Specialist_Travel__c,Expenditure_Special_Clothing_ST__c,Expenditure_Special_Clothing__c,Expenditure_Special_Foods_ST__c,Expenditure_Special_Foods__c,Expenditure_Temporary_Care_ST__c,Expenditure_Temporary_Care__c,Expenditure_Transport_ST__c,Expenditure_Transport__c,Expenditure_Utilities_ST__c,Expenditure_Utilities__c,Family_with_One_Child_High__c,Family_with_One_Child_Low__c,Family_with_One_Child_Medium__c,FullName__c,Health_Care_Card_Low__c,Id,Individual_High__c,Individual_Low__c,Individual_Medium__c,Name,OwnerId,Pension_Low__c,Phone__c,Your_Service_Provider__c,Your_Signature__c
- 
- Income_Self_Declaration__c
- 
+private static Map<String,String> getEnvValuesByNames(Set<String> developerNames) {
+        Map<String,String> out = new Map<String,String>();
+        if (developerNames == null || developerNames.isEmpty()) return out;
+        for (Environment_Variables__mdt ev :
+             [SELECT DeveloperName, Value__c
+              FROM Environment_Variables__mdt
+              WHERE DeveloperName IN :developerNames]) {
+            out.put(ev.DeveloperName, ev.Value__c);
+        }
+        return out;
+    }
+
+    private static String formatDate(Date d) {
+        if (d == null) return '';
+        return Datetime.newInstance(d.year(), d.month(), d.day(), 0, 0, 0).format('dd/MM/yyyy');
+    }
+    private static String formatCurrency(Decimal v) {
+        if (v == null) return '';
+        return '$' + String.valueOf(v.setScale(2));
+    }
+    private static String sanitizeTitle(String inputStr) {
+        if (inputStr == null || inputStr.trim() == '') return 'Record';
+        String clean = inputStr.replaceAll('[\\\\/:*?"<>|#%&{}$!@`~^+=]', ' ');
+        clean = clean.replaceAll('\\s+', '_');
+        if (clean.length() > 120) clean = clean.substring(0, 120);
+        return clean;
+    }
+}
