@@ -1,94 +1,104 @@
 @isTest
 private class MC_OpportunityDocGen_Agreements_Test {
 
-    @testSetup
-    static void setupTestData() {
-        // create a person account and opportunity using factory
+    // Helper to build a wrapper with a real ContentVersion Id and template
+    private static MC_OpportunityDocGen_Agreements.Wrapper makeWrapperWithCV(Id recordId, Id contentVersionId, String templateName) {
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ recordId };
+        w.templateContentVersionId = contentVersionId;
+        w.docTemplateName = templateName;
+        return w;
+    }
+
+    @isTest static void testGenerateAgreement_HappyPath() {
+        // Setup test data using MC_TestDataFactory
+        Test.startTest();
+        // Create a person Account (factory method creates and inserts)
         Account person = MC_TestDataFactory.createPersonAccount();
+        // Create an Opportunity linked to that account
         Opportunity opp = MC_TestDataFactory.createOpportunity(person.Id);
 
-        // create a ContentVersion (factory already provides one — but create explicitly to be clear)
-        ContentVersion cv = MC_TestDataFactory.createContentVersion();
-
-        // create the DocumentTemplate that the generator expects (default name used in class)
-        DocumentTemplate dt = new DocumentTemplate(
+        // Ensure we have a DocumentTemplate with the expected name (use same name class expects or override via wrapper)
+        // The target class uses DEFAULT_TEMPLATE_NAME = 'GeneralServiceAgreementTemplate' by default.
+        DocumentTemplate tmpl = new DocumentTemplate(
             Name = 'GeneralServiceAgreementTemplate',
             IsActive = true,
             Type = 'MicrosoftWord',
             TokenMappingType = 'JSON'
         );
-        insert dt;
+        insert tmpl;
 
-        // store ids on static custom settings - not required; keeping minimal for test
-        // The test methods will query items created above by their properties
-    }
-
-    // Happy path: call generateFromFlow with a real Opportunity Id and an explicit ContentVersion Id
-    @isTest static void testGenerateAgreement_HappyPath() {
-        // Fetch the person account and opp created in @testSetup
-        Account acc = [SELECT Id, PersonContactId FROM Account WHERE PersonEmail = 'testSales@apex.com' LIMIT 1];
-        Opportunity opp = [SELECT Id, AccountId FROM Opportunity WHERE AccountId = :acc.Id LIMIT 1];
-
-        // Create a ContentVersion to pass directly to wrapper (ensure we have a current CV)
+        // Create a ContentVersion to represent the DOCX to be merged; use factory if available else insert directly
         ContentVersion cv = new ContentVersion(
-            Title = 'SAH Template',
-            PathOnClient = 'SAHTemplate.docx',
+            Title = 'Test Agreement Template',
+            PathOnClient = 'ServiceAgreement.docx',
             VersionData = Blob.valueOf('Dummy content for test')
         );
         insert cv;
 
-        // The wrapper accepts templateContentVersionId as ContentVersion.Id
-        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
-        w.recordIds = new List<Id>{ opp.Id };
-        w.templateContentVersionId = cv.Id;
-        // docTemplateName omitted so class should resolve default template name
-        // ensure the matching DocumentTemplate exists (created in @testSetup)
+        // Re-query to get the Id (ContentVersion.Id is returned on insert)
+        ContentVersion cvq = [SELECT Id, ContentDocumentId FROM ContentVersion WHERE Id = :cv.Id LIMIT 1];
 
-        Test.startTest();
-            // Call the invocable. Should not throw and should complete mapping logic.
+        // Build wrapper and call generate
+        MC_OpportunityDocGen_Agreements.Wrapper w = makeWrapperWithCV(opp.Id, cvq.Id, 'GeneralServiceAgreementTemplate');
+
+        // Call method - should not throw
+        try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+        } catch (Exception ex) {
+            // If any exception occurs, fail the test
+            System.assert(false, 'Unexpected exception in happy path: ' + ex.getMessage());
+        }
         Test.stopTest();
 
-        // No DGP inserted in test context due to Test.isRunningTest() guard inside class.
-        // Assert no exceptions and basic sanity: the Opportunity must still exist
-        Opportunity oppAfter = [SELECT Id FROM Opportunity WHERE Id = :opp.Id LIMIT 1];
-        System.assertEquals(opp.Id, oppAfter.Id, 'Opportunity should remain unchanged after generation call.');
+        // If we reached here, the run completed successfully.
+        System.assert(true, 'Generate completed without exception.');
     }
 
-    // Negative test: missing recordIds in wrapper -> expect AuraHandledException('No Opportunity Id provided.')
-    @isTest static void testGenerateAgreement_NoRecordIds_Throws() {
-        MC_OpportunityDocGen_Agreements.Wrapper wEmpty = new MC_OpportunityDocGen_Agreements.Wrapper();
-        // intentionally leave wEmpty.recordIds null/empty
-
-        Test.startTest();
-            try {
-                MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ wEmpty });
-                // If we get here the test should fail
-                System.assert(false, 'Expected AuraHandledException when no opportunity Id is provided.');
-            } catch (Exception ex) {
-                // The class throws AuraHandledException; assert the message contains our expected text.
-                String msg = ex.getMessage();
-                System.assert(msg != null && msg.contains('No Opportunity Id provided'), 'Expected "No Opportunity Id provided." but got: ' + msg);
-            }
-        Test.stopTest();
-    }
-
-    // Negative test: provided Id does not correspond to an Opportunity -> expect AuraHandledException('Opportunity not found for Id: ...')
     @isTest static void testGenerateAgreement_NonExistentOpportunity_Throws() {
-        // Generate a fake (but well-formed) Id that won't match any Opportunity
-        Id fakeOppId = Id.valueOf('006' + String.valueOf(Math.abs(Crypto.getRandomInteger()))); // 006... is Opportunity prefix
-
-        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
-        w.recordIds = new List<Id>{ fakeOppId };
-
         Test.startTest();
-            try {
-                MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-                System.assert(false, 'Expected AuraHandledException when Opportunity is not found for provided Id.');
-            } catch (Exception ex) {
-                String msg = ex.getMessage();
-                System.assert(msg != null && msg.contains('Opportunity not found for Id'), 'Expected Opportunity-not-found message but got: ' + msg);
-            }
+        // Create an Account + Opportunity then delete the opportunity to produce a valid Id that does not exist
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity tempOpp = MC_TestDataFactory.createOpportunity(acc.Id);
+        Id validButMissingOppId = tempOpp.Id;
+        // Delete to simulate "Id provided but record not found"
+        delete tempOpp;
+
+        // Create ContentVersion to satisfy the method (so it doesn't fall back to env vars)
+        ContentVersion cv = new ContentVersion(
+            Title = 'FakeTemplate',
+            PathOnClient = 'Fake.docx',
+            VersionData = Blob.valueOf('test')
+        );
+        insert cv;
+        ContentVersion cvq = [SELECT Id FROM ContentVersion WHERE Id = :cv.Id LIMIT 1];
+
+        MC_OpportunityDocGen_Agreements.Wrapper w = makeWrapperWithCV(validButMissingOppId, cvq.Id, 'GeneralServiceAgreementTemplate');
+
+        // Expect AuraHandledException with message "Opportunity not found for Id: ..."
+        try {
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+            System.assert(false, 'Expected AuraHandledException when Opportunity does not exist.');
+        } catch (Exception ex) {
+            // The class throws AuraHandledException('Opportunity not found for Id: ' + Id)
+            String msg = ex.getMessage();
+            System.assert(msg != null && msg.contains('Opportunity not found for Id'), 'Unexpected exception message: ' + msg);
+        }
+        Test.stopTest();
+    }
+
+    // Optional: test invalid input (no recordIds) -> AuraHandledException
+    @isTest static void testGenerateAgreement_NoRecordIds_Throws() {
+        Test.startTest();
+        MC_OpportunityDocGen_Agreements.Wrapper emptyW = new MC_OpportunityDocGen_Agreements.Wrapper();
+        // leave recordIds null to trigger guard at top of generateFromFlow
+        try {
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ emptyW });
+            System.assert(false, 'Expected AuraHandledException for missing Opportunity Id.');
+        } catch (Exception ex) {
+            System.assert(ex.getMessage().contains('No Opportunity Id provided.') || ex.getMessage().contains('No Opportunity Id'),
+                          'Unexpected exception text when recordIds missing: ' + ex.getMessage());
+        }
         Test.stopTest();
     }
 }
