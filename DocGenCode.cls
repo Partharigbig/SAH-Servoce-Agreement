@@ -504,38 +504,75 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         token.put('showPartH_Restorative',  showPartH_Restorative);
         token.put('showPartI_EndOfLife',    showPartI_EndOfLife);
         
-       // Buckets (separate AT and HM for Part G) 
-		/* ===================== PART G: AT (Assistive Technology) ===================== */
+       /* ===================== PART G: AT (Assistive Technology) ===================== */
         token.put('AT_StartDate',     gAT.minStart == null ? '' : formatDate(gAT.minStart));
         token.put('AT_EndDate',       gAT.maxEnd   == null ? '' : formatDate(gAT.maxEnd));
         token.put('AT_ApprovedAmount', gAT.totalApproved == null ? '' : formatCurrency(gAT.totalApproved));
-        token.put('AT_FundingTier',   classifyTier(gAT.totalApproved));    // optional text display
+        token.put('AT_FundingTier',   classifyTier(gAT.totalApproved));
          
-        // AT tier checkboxes (use these tokens in the four checkboxes)
-        token.put('AT_Tier_500',    renderBox(gAT.totalApproved != null && gAT.totalApproved <= 500));
-        token.put('AT_Tier_2000',   renderBox(gAT.totalApproved != null && gAT.totalApproved > 500   && gAT.totalApproved <= 2000));
-        token.put('AT_Tier_15000',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 2000  && gAT.totalApproved <= 15000));
-        token.put('AT_Tier_Other',  renderBox(gAT.totalApproved != null && gAT.totalApproved > 15000));
+        // --- AT tier YES logic ---
+        String at500  = '';
+        String at2000 = '';
+        String at15000= '';
+        String atOther= '';
+         
+        if (gAT.totalApproved != null) {
+            Decimal amt = gAT.totalApproved;
+            if (amt <= 500) at500 = 'Yes';
+            else if (amt > 500 && amt <= 2000) at2000 = 'Yes';
+            else if (amt > 2000 && amt <= 15000) at15000 = 'Yes';
+            else if (amt > 15000) atOther = 'Yes';
+        }
+         
+        token.put('AT_Tier_500_YES',   at500);
+        token.put('AT_Tier_2000_YES',  at2000);
+        token.put('AT_Tier_15000_YES', at15000);
+        token.put('AT_Tier_Other_YES', atOther);
          
         /* ===================== PART G: HM (Home Modifications) ===================== */
         token.put('HM_StartDate',     gHM.minStart == null ? '' : formatDate(gHM.minStart));
         token.put('HM_EndDate',       gHM.maxEnd   == null ? '' : formatDate(gHM.maxEnd));
         token.put('HM_ApprovedAmount', gHM.totalApproved == null ? '' : formatCurrency(gHM.totalApproved));
-        token.put('HM_FundingTier',   classifyTier(gHM.totalApproved));    // optional text display
+        token.put('HM_FundingTier',   classifyTier(gHM.totalApproved));
          
-        // HM tier checkboxes (use these tokens in the four checkboxes)
-        token.put('HM_Tier_500',    renderBox(gHM.totalApproved != null && gHM.totalApproved <= 500));
-        token.put('HM_Tier_2000',   renderBox(gHM.totalApproved != null && gHM.totalApproved > 500   && gHM.totalApproved <= 2000));
-        token.put('HM_Tier_15000',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 2000  && gHM.totalApproved <= 15000));
-        token.put('HM_Tier_Other',  renderBox(gHM.totalApproved != null && gHM.totalApproved > 15000));
+        // --- HM tier YES logic ---
+        String hm500  = '';
+        String hm2000 = '';
+        String hm15000= '';
+        String hmOther= '';
+         
+        if (gHM.totalApproved != null) {
+            Decimal amt = gHM.totalApproved;
+            if (amt <= 500) hm500 = 'Yes';
+            else if (amt > 500 && amt <= 2000) hm2000 = 'Yes';
+            else if (amt > 2000 && amt <= 15000) hm15000 = 'Yes';
+            else if (amt > 15000) hmOther = 'Yes';
+        }
+         
+        token.put('HM_Tier_500_YES',   hm500);
+        token.put('HM_Tier_2000_YES',  hm2000);
+        token.put('HM_Tier_15000_YES', hm15000);
+        token.put('HM_Tier_Other_YES', hmOther);
          
         /* ===================== PART H: Restorative Care ===================== */
         token.put('Restorative_StartDate',     gR.minStart == null ? '' : formatDate(gR.minStart));
         token.put('Restorative_EndDate',       gR.maxEnd   == null ? '' : formatDate(gR.maxEnd));
         token.put('Restorative_ApprovedAmount', gR.totalApproved == null ? '' : formatCurrency(gR.totalApproved));
         token.put('Restorative_Tier',          classifyTier(gR.totalApproved));
-        token.put('Restorative_Tier_6000', renderBox(gR.totalApproved != null && gR.totalApproved <= 6000));
-        token.put('Restorative_Tier_Other', renderBox(gR.totalApproved != null && gR.totalApproved > 6000));
+         
+        // --- Restorative YES logic ---
+        String r6000 = '';
+        String rOther = '';
+         
+        if (gR.totalApproved != null) {
+            Decimal amt = gR.totalApproved;
+            if (amt <= 6000) r6000 = 'Yes';
+            else rOther = 'Yes';
+        }
+         
+        token.put('Restorative_Tier_6000_YES', r6000);
+        token.put('Restorative_Tier_Other_YES', rOther);
+                
        /* ===================== PART H: Services to be delivered (Entitlements Table) ===================== */
         List<Map<String,Object>> restorativeRows = new List<Map<String,Object>>();
         Integer rIdx = 1;
@@ -589,7 +626,9 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         List<Map<String,Object>> AT_Entitlements = new List<Map<String,Object>>();
         Decimal atEntTotal = 0;
         for (maica_cc__Funding_Item__c fi : grpAT) {
-            for (maica_cc__Entitlement__c e : entsByFI.get(fi.Id)) {
+            List<maica_cc__Entitlement__c> listForFi = entsByFI.get(fi.Id);
+            if (listForFi == null) continue;
+            for (maica_cc__Entitlement__c e : listForFi) {
                 Map<String,Object> row = new Map<String,Object>();
                 row.put('EntitlementName', e.Name);
                 row.put('Approved_Amount_Display', formatCurrency(e.maica_cc__Approved_Amount__c));
@@ -604,7 +643,9 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         List<Map<String,Object>> HM_Entitlements = new List<Map<String,Object>>();
         Decimal hmEntTotal = 0;
         for (maica_cc__Funding_Item__c fi : grpHM) {
-            for (maica_cc__Entitlement__c e : entsByFI.get(fi.Id)) {
+            List<maica_cc__Entitlement__c> listForFi = entsByFI.get(fi.Id);
+            if (listForFi == null) continue;
+            for (maica_cc__Entitlement__c e : listForFi) {
                 Map<String,Object> row = new Map<String,Object>();
                 row.put('EntitlementName', e.Name);
                 row.put('Approved_Amount_Display', formatCurrency(e.maica_cc__Approved_Amount__c));
@@ -715,10 +756,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     /* ================= Helpers ================= */
-    // Render a “checkbox” using Unicode (DocGen-friendly)
-    private static String renderBox(Boolean b) {
-        return (b == true ? '☒' : '☐');
-    }
     // Roll-up of min start, max end, and total approved for a set of Funding Items
     private class PartRollup {
         public Date    minStart;
