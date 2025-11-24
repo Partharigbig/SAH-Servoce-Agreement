@@ -3,18 +3,17 @@ private class MC_OpportunityDocGen_Agreements_Test {
 
     @testSetup
     static void setupCommonData() {
-        // create a person account and an opportunity to be reused by tests
+        // Use your factory to create baseline objects (person account + opp + product + oli etc.)
         Account acc = MC_TestDataFactory.createPersonAccount();
         Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-        // create support item, product, pbe and oli using factory
         maica_cc__Support_Item__c supportItem = MC_TestDataFactory.CreateSupportItem();
         maica_cc__Support_Category__c supportCategory = MC_TestDataFactory.CreateSupportCategory();
         Product2 prod = MC_TestDataFactory.createProduct(supportCategory.Id);
         PricebookEntry pbe = MC_TestDataFactory.createPricebookEntry(prod.Id);
         OpportunityLineItem oli = MC_TestDataFactory.createOpportunityLineItem(opp.Id, pbe.Id, supportItem.Id);
 
-        // Create a minimal Service Agreement (some code paths read this)
+        // Create a small Service Agreement record used by logic (some code paths read this)
         maica_cc__Service_Agreement__c sa = new maica_cc__Service_Agreement__c();
         sa.Name = 'Test SA Setup';
         sa.Opportunity__c = opp.Id;
@@ -23,17 +22,32 @@ private class MC_OpportunityDocGen_Agreements_Test {
         sa.maica_cc__Funding_Source__c = 'Support at Home';
         insert sa;
 
-        // Create an active DocumentTemplate with required fields.
-        // Include DeveloperName (sometimes required in orgs) to avoid insert errors.
-        DocumentTemplate tmpl = new DocumentTemplate();
-        tmpl.Name = 'GeneralServiceAgreementTemplate';
-        tmpl.DeveloperName = 'GeneralServiceAgreementTemplate';
-        tmpl.IsActive = true;
-        tmpl.Type = 'MicrosoftWord';
-        tmpl.TokenMappingType = 'JSON';
-        tmpl.TokenMappingMethodType = 'CustomClass';
-        tmpl.CustomClassName = 'MC_OpportunityDocGen_Agreements'; // any existing class name is fine
-        insert tmpl;
+        // Create an active DocumentTemplate -- only set commonly writable fields.
+        // Some orgs (packaged or different API versions) don't expose DeveloperName for DML in tests,
+        // so we avoid setting it. If insert fails, we fall back to querying an existing template with same name.
+        String tmplName = 'GeneralServiceAgreementTemplate';
+        DocumentTemplate tmplToUse;
+        try {
+            DocumentTemplate tmpl = new DocumentTemplate();
+            tmpl.Name = tmplName;
+            tmpl.IsActive = true;
+            tmpl.Type = 'MicrosoftWord';
+            tmpl.TokenMappingType = 'JSON';
+            tmpl.TokenMappingMethodType = 'CustomClass';
+            // CustomClassName is optional but helps to match what production uses
+            tmpl.CustomClassName = 'MC_OpportunityDocGen_Agreements';
+            insert tmpl;
+            tmplToUse = tmpl;
+        } catch (DmlException dmx) {
+            // fallback: find existing template with the name (if any)
+            List<DocumentTemplate> found = [SELECT Id, Name FROM DocumentTemplate WHERE Name = :tmplName AND IsActive = true LIMIT 1];
+            if (!found.isEmpty()) {
+                tmplToUse = found[0];
+            } else {
+                // If none found, rethrow to surface real problem
+                throw dmx;
+            }
+        }
 
         // Create a ContentVersion to act as templateContentVersionId
         ContentVersion cv = new ContentVersion();
@@ -41,6 +55,8 @@ private class MC_OpportunityDocGen_Agreements_Test {
         cv.PathOnClient = 'AgreementTemplate.docx';
         cv.VersionData = Blob.valueOf('Test Content');
         insert cv;
+
+        // minimal approved service / funding items are created by factory elsewhere; no return needed
     }
 
     // helper to fetch the opp created in @testSetup
@@ -53,7 +69,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
     }
 
     private static String getTemplateName() {
-        // same as we inserted in @testSetup
         return 'GeneralServiceAgreementTemplate';
     }
 
@@ -68,11 +83,10 @@ private class MC_OpportunityDocGen_Agreements_Test {
         w.templateContentVersionId = cv.Id;
         w.docTemplateName = getTemplateName();
 
-        // Should not throw; in test context the class will not insert DocumentGenerationProcess (it checks Test.isRunningTest())
+        // The implementation will not insert DocumentGenerationProcess under Test.isRunningTest()
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
         } catch (Exception ex) {
-            // Fail with the exception message so we capture unexpected behavior
             System.assert(false, 'generateFromFlow threw unexpectedly in happyPath_test: ' + ex.getMessage());
         }
         Test.stopTest();
@@ -81,9 +95,8 @@ private class MC_OpportunityDocGen_Agreements_Test {
     @isTest
     static void noId_throws() {
         Test.startTest();
-
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
-        // w.recordIds intentionally left null/empty to hit the validation that throws "No Opportunity Id provided."
+        // w.recordIds intentionally left null/empty
 
         Boolean sawExpected = false;
         try {
@@ -91,7 +104,8 @@ private class MC_OpportunityDocGen_Agreements_Test {
         } catch (Exception ex) {
             String msg = ex.getMessage() == null ? '' : ex.getMessage().toLowerCase();
             System.debug('noId_throws captured exception: ' + msg);
-            System.assert(msg.contains('opportunity') || msg.contains('id') || msg.contains('no'), 'Unexpected exception message: ' + msg);
+            // Expect the validation to complain about missing Id / Opportunity Id provided.
+            System.assert(msg.contains('no opportunity') || msg.contains('no opportunity id') || msg.contains('no opportunity id provided') || msg.contains('no opportunity id'), 'Unexpected exception message: ' + msg);
             sawExpected = true;
         }
         System.assert(sawExpected, 'Expected an exception when wrapper has no recordIds.');
@@ -120,7 +134,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
         } catch (Exception ex) {
             String msg = ex.getMessage() == null ? '' : ex.getMessage().toLowerCase();
             System.debug('missingOpportunity_throws captured exception: ' + msg);
-            // class throws something like 'Opportunity not found for Id: ...' - check for 'not found' or 'opportunity' presence
             System.assert(msg.contains('not found') || msg.contains('opportunity'), 'Unexpected exception message: ' + msg);
             sawExpected = true;
         }
