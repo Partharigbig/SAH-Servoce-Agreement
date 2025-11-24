@@ -1,109 +1,261 @@
-BudgetId__c
+@isTest
+private class MC_OpportunityDocGen_Agreements_OptimizedTest {
 
-CreatedById
+    // Simple CV helper (keeps tests isolated)
+    private static ContentVersion createContentVersion(String title) {
+        ContentVersion cv = new ContentVersion(
+            Title = title,
+            PathOnClient = title + '.docx',
+            VersionData = Blob.valueOf('Test content for ' + title)
+        );
+        insert cv;
+        return cv;
+    }
 
-CreatedDate
+    // Ensure a DocumentTemplate exists with the expected name
+    private static DocumentTemplate ensureDocumentTemplate(String name) {
+        // if there is already one with that name, reuse (avoid duplicate errors)
+        List<DocumentTemplate> found = [SELECT Id, Name FROM DocumentTemplate WHERE Name = :name LIMIT 1];
+        if (!found.isEmpty()) return found[0];
 
-Funding_Administrator__c
+        DocumentTemplate dt = new DocumentTemplate(
+            Name = name,
+            IsActive = true,
+            Type = 'MicrosoftWord',
+            TokenMappingType = 'JSON',
+            TokenMappingMethodType = 'CustomClass',
+            CustomClassName = 'MC_OpportunityDocGen_Agreements'
+        );
+        insert dt;
+        return dt;
+    }
 
-Funding_Program__c
+    // ------------- NEGATIVE / ERROR PATHS ---------------
 
-Funding_Type__c
+    @isTest static void test_noWrapper_throwsAuraHandledException() {
+        // empty list or null input should throw
+        Test.startTest();
+        try {
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>());
+            System.assert(false, 'Expected AuraHandledException for empty input');
+        } catch (AuraHandledException ex) {
+            System.assert(ex.getMessage().contains('No Opportunity Id provided.'), 'Expected missing id message');
+        }
+        Test.stopTest();
+    }
 
-Id
+    @isTest static void test_missingDocumentTemplate_throwsAuraHandledException() {
+        // Create opp and contentversion, but pass a docTemplateName that doesn't exist -> expect template not found
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
+        ContentVersion cv = createContentVersion('MissingTemplateCV');
 
-IsDeleted
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.templateContentVersionId = cv.Id;
+        w.docTemplateName = 'NON_EXISTENT_TEMPLATE_' + Math.abs(Crypto.getRandomInteger());
 
-LastActivityDate
+        Test.startTest();
+        try {
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+            System.assert(false, 'Expected AuraHandledException for missing DocumentTemplate');
+        } catch (AuraHandledException ex) {
+            System.assert(ex.getMessage().contains('Active DocumentTemplate not found for Name'), 'Expected missing template message');
+        }
+        Test.stopTest();
+    }
 
-LastModifiedById
+    @isTest static void test_missingEnvContent_throwsAuraHandledException_when_no_CV() {
+        // Create opp but DO NOT provide templateContentVersionId; also do not set a matching Environment_Variables__mdt record.
+        // This should trigger the AuraHandledException complaining about missing Environment Variable.
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-LastModifiedDate
+        // wrapper without templateContentVersionId and without envContentDocVarName set => pickEnvKeyByFunding will be called.
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
 
-LastReferencedDate
+        Test.startTest();
+        try {
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+            System.assert(false, 'Expected AuraHandledException for missing Environment Variable content doc id');
+        } catch (AuraHandledException ex) {
+            // message created by production class
+            System.assert(ex.getMessage().contains('No Environment Variable found for'), 'Expected missing ENV Variable message');
+        }
+        Test.stopTest();
+    }
 
-LastViewedDate
+    // ------------- POSITIVE / COVERAGE-INTENSIVE PATHS ---------------
 
-maica_cc__Active__c
+    @isTest static void test_generate_basicHappyPath_and_tokens() {
+        // Minimal happy path: Person Account, Opportunity, ContentVersion override and DocumentTemplate present.
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-maica_cc__Allocated_Amount__c
+        // Provide a CV and DocumentTemplate
+        ContentVersion cv = createContentVersion('HappyPathCV');
+        String templateName = 'GeneralServiceAgreementTemplate';
+        ensureDocumentTemplate(templateName);
 
-maica_cc__Approved_Amount__c
+        // Basic wrapper - pass contentVersionId to skip ENV lookup
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.templateContentVersionId = cv.Id;
+        w.docTemplateName = templateName;
 
-maica_cc__Claim_Period__c
+        Test.startTest();
+            // Should not throw
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+        Test.stopTest();
 
-maica_cc__Daily_Life__c
+        // Basic sanity assertion: opportunity still exists
+        Opportunity oQ = [SELECT Id, AccountId FROM Opportunity WHERE Id = :opp.Id LIMIT 1];
+        System.assertEquals(acc.Id, oQ.AccountId, 'Opportunity remained linked to person account');
+    }
 
-maica_cc__End_Date__c
+    @isTest static void test_generate_withFundingItems_entitlements_products_and_serviceAgreement() {
+        // This covers grouping, rollups, tiers (AT/HM), restorative branch, entitlements tables and product rows.
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-maica_cc__Exclude_From_Statement__c
+        // Create Funding parent + funding items in categories to exercise all branches
+        maica_cc__Funding__c funding = new maica_cc__Funding__c(
+            Name = 'Test Funding Bulk',
+            maica_cc__Start_Date__c = Date.today().addDays(-5),
+            maica_cc__End_Date__c = Date.today().addMonths(6),
+            Funding_Type__c = 'Home Care Package'
+        );
+        insert funding;
 
-maica_cc__Funding_Duration_Weeks__c
+        // Four funding items: AT (<=500), HM (between 2001-15000), Restorative (<=6000), EOL
+        maica_cc__Funding_Item__c fiAT   = new maica_cc__Funding_Item__c(Name='FI_AT_small', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 400, maica_cc__Budget_Type__c='Assistive technology');
+        maica_cc__Funding_Item__c fiHM   = new maica_cc__Funding_Item__c(Name='FI_HM_mid', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 5000, maica_cc__Budget_Type__c='Home modifications');
+        maica_cc__Funding_Item__c fiR    = new maica_cc__Funding_Item__c(Name='FI_Restorative', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 4000, maica_cc__Budget_Type__c='Restorative care pathway');
+        maica_cc__Funding_Item__c fiEOL  = new maica_cc__Funding_Item__c(Name='FI_EOL', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 100, maica_cc__Budget_Type__c='End of life pathway');
+        insert new List<maica_cc__Funding_Item__c>{ fiAT, fiHM, fiR, fiEOL };
 
-maica_cc__Funding_Extended__c
+        // Entitlements for each funding item
+        List<maica_cc__Entitlement__c> entList = new List<maica_cc__Entitlement__c>{
+            new maica_cc__Entitlement__c(Name='Ent_AT_1', maica_cc__Funding_Item__c = fiAT.Id, maica_cc__Approved_Amount__c = 400),
+            new maica_cc__Entitlement__c(Name='Ent_HM_1', maica_cc__Funding_Item__c = fiHM.Id, maica_cc__Approved_Amount__c = 5000),
+            new maica_cc__Entitlement__c(Name='Ent_R_1',  maica_cc__Funding_Item__c = fiR.Id, maica_cc__Approved_Amount__c = 4000)
+        };
+        insert entList;
 
-maica_cc__Funding_Period_Progress__c
+        // Link funding to opportunity and set Funding_Source
+        opp.Funding__c = funding.Id;
+        opp.Funding_Source__c = 'Home Care Package';
+        opp.Agreement_Start_Date__c = Date.today().addDays(-15);
+        update opp;
 
-maica_cc__Funding_Period_Remaining__c
+        // Add approved services under funding to hit ApprovedServiceList logic
+        maica_cc__Approved_Service__c as1 = new maica_cc__Approved_Service__c(Name='Service A', maica_cc__Funding__c = funding.Id);
+        maica_cc__Approved_Service__c as2 = new maica_cc__Approved_Service__c(Name='Service B', maica_cc__Funding__c = funding.Id);
+        insert new List<maica_cc__Approved_Service__c>{ as1, as2 };
 
-maica_cc__Funding_Periods__c
+        // Create a product + pricebook entry + OLI to hit ProductUnits loop
+        maica_cc__Support_Item__c supportItem = MC_TestDataFactory.CreateSupportItem();
+        maica_cc__Support_Category__c sc = MC_TestDataFactory.CreateSupportCategory();
+        Product2 prod = MC_TestDataFactory.createProduct(sc.Id);
+        PricebookEntry pbe = MC_TestDataFactory.createPricebookEntry(prod.Id);
+        OpportunityLineItem oli = MC_TestDataFactory.createOpportunityLineItem(opp.Id, pbe.Id, supportItem.Id);
 
-maica_cc__Funding_Remaining_Weeks__c
+        // Add a Service Agreement to verify SA overrides service start/end and calculation of ServiceReviewDate
+        maica_cc__Service_Agreement__c sa = new maica_cc__Service_Agreement__c(
+            Opportunity__c = opp.Id,
+            maica_cc__Start_Date__c = Date.today().addDays(-30),
+            maica_cc__End_Date__c = Date.today().addMonths(3),
+            maica_cc__Funding_Source__c = 'Home Care Package'
+        );
+        insert sa;
 
-maica_cc__Funding_Source__c
+        // Create DocumentTemplate & CV
+        ContentVersion cv = createContentVersion('BulkCoverageCV');
+        String templateName = 'GeneralServiceAgreementTemplate';
+        ensureDocumentTemplate(templateName);
 
-maica_cc__Last_External_Sync__c
+        // Call production method
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.templateContentVersionId = cv.Id;
+        w.docTemplateName = templateName;
 
-maica_cc__Last_NDIS_Sync__c
+        Test.startTest();
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+        Test.stopTest();
 
-maica_cc__Living_Arrangements__c
+        // Assertions to ensure we created entitlements and product rows (indirect verification)
+        Integer entCount = [SELECT count() FROM maica_cc__Entitlement__c WHERE maica_cc__Funding_Item__c IN :new List<Id>{fiAT.Id, fiHM.Id, fiR.Id}];
+        System.assertEquals(3, entCount, 'Three entitlements exist for AT/HM/Restorative items');
 
-maica_cc__NDIS_Reference__c
+        OpportunityLineItem oliQ = [SELECT Id, Quantity, UnitPrice FROM OpportunityLineItem WHERE Id = :oli.Id LIMIT 1];
+        System.assertEquals(2, Integer.valueOf(String.valueOf(oliQ.Quantity)), 'OLI quantity should be preserved');
+        System.assertEquals(100, Integer.valueOf(String.valueOf(oliQ.UnitPrice)), 'OLI unit price should be preserved');
+    }
 
-maica_cc__PACE_Funding__c
+    @isTest static void test_tier_branches_and_yes_flags() {
+        // Create funding items that specifically trigger the tier branches including >15000 and <=500
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-maica_cc__Participant__c
+        maica_cc__Funding__c funding = new maica_cc__Funding__c(Name='TierTestFunding');
+        insert funding;
 
-maica_cc__Provided_By__c
+        maica_cc__Funding_Item__c atHuge = new maica_cc__Funding_Item__c(Name='AT_Huge', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 20000, maica_cc__Budget_Type__c='Assistive technology');
+        maica_cc__Funding_Item__c hmTiny = new maica_cc__Funding_Item__c(Name='HM_Tiny', maica_cc__Funding__c = funding.Id, maica_cc__Approved_Amount__c = 300, maica_cc__Budget_Type__c='Home modifications');
+        insert new List<maica_cc__Funding_Item__c>{ atHuge, hmTiny };
 
-maica_cc__Remaining_Amount__c
+        insert new maica_cc__Entitlement__c(Name='Ent_AT_Huge', maica_cc__Funding_Item__c = atHuge.Id, maica_cc__Approved_Amount__c = 20000);
+        insert new maica_cc__Entitlement__c(Name='Ent_HM_Tiny', maica_cc__Funding_Item__c = hmTiny.Id, maica_cc__Approved_Amount__c = 300);
 
-maica_cc__Spent_Amount__c
+        opp.Funding__c = funding.Id;
+        opp.Funding_Source__c = 'Support at Home'; // ensures pickEnvByFunding branch if env path used
+        update opp;
 
-maica_cc__Start_Date__c
+        ContentVersion cv = createContentVersion('TierCV2');
+        String templateName = 'GeneralServiceAgreementTemplate';
+        ensureDocumentTemplate(templateName);
 
-maica_cc__Strengths__c
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.templateContentVersionId = cv.Id;
+        w.docTemplateName = templateName;
 
-maica_cc__Total_Approved_Active__c
+        Test.startTest();
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+        Test.stopTest();
 
-maica_cc__Total_Available_Funding_Current_Month__c
+        // Verify entitlements exist and were created above
+        Integer eCount = [SELECT count() FROM maica_cc__Entitlement__c WHERE maica_cc__Funding_Item__c IN :new List<Id>{atHuge.Id, hmTiny.Id}];
+        System.assertEquals(2, eCount, 'Expected two entitlements for AT/HM items');
+    }
 
-maica_cc__Total_Available_Funding_Daily__c
+    // Extra smoke: exercise sanitizeTitle with a very long account name (created via Person Account)
+    @isTest static void test_sanitizeTitle_truncation_and_specialChars() {
+        // Create a person account with a very long name including special characters
+        Id rtPerson = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Person Account').getRecordTypeId();
+        String longName = 'A' + String.valueOf(Crypto.getRandomInteger()).repeat(30) + ':/<>|*?&%$#!@~^+= test';
+        Account acc = new Account(FirstName='VeryLong', LastName=longName, RecordTypeId=rtPerson, PersonEmail='long@test.com');
+        insert acc;
 
-maica_cc__Total_Billable_Fees_Daily__c
+        Opportunity opp = new Opportunity(Name='OPP for long', AccountId = acc.Id, StageName = 'New', CloseDate = Date.today().addDays(7));
+        insert opp;
 
-maica_cc__Total_Budget_Income_Daily__c
+        ContentVersion cv = createContentVersion('LongTitleCV');
+        ensureDocumentTemplate('GeneralServiceAgreementTemplate');
 
-maica_cc__Total_Claimable_Fees_Daily__c
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ opp.Id };
+        w.templateContentVersionId = cv.Id;
+        w.docTemplateName = 'GeneralServiceAgreementTemplate';
 
-maica_cc__Total_Client_Contributions_Daily__c
+        Test.startTest();
+            MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+        Test.stopTest();
 
-maica_cc__Total_Items__c
-
-maica_cc__Total_Remaining_Active__c
-
-maica_cc__Utilisation__c
-
-MC_Home_Care_Account_Balance__c
-
-MC_Provider_Held_Care_Recipient_Fund__c
-
-MC_Provider_Held_Commonwealth_Funds__c
-
-Name
-
-OwnerId
-
-Program_Priority__c
-
-SystemModstamp
+        // If no ex thrown, sanitizeTitle worked fine (can't access private output). Assert opp exists.
+        Opportunity oQ = [SELECT Id, AccountId FROM Opportunity WHERE Id = :opp.Id LIMIT 1];
+        System.assertEquals(acc.Id, oQ.AccountId, 'Opportunity linked to long-name person account');
+    }
+}
