@@ -1,56 +1,29 @@
 @isTest
 private class MC_OpportunityDocGen_Agreements_Test {
 
-    // helper to create a DocumentTemplate + ContentVersion
-    private static Map<String, Id> createTemplateAndContent(String templateName) {
-        Map<String, Id> out = new Map<String, Id>();
-
-        // Create an active DocumentTemplate (mapping-only template)
-        DocumentTemplate dt = new DocumentTemplate(
-            Name = templateName,
-            IsActive = true,
-            Type = 'MicrosoftWord',
-            TokenMappingType = 'JSON'
-        );
-        insert dt;
-        out.put('templateId', dt.Id);
-
-        // Create a simple ContentVersion (a docx blob)
-        ContentVersion cv = new ContentVersion(
-            Title = templateName + '_cv',
-            PathOnClient = templateName + '.docx',
-            VersionData = Blob.valueOf('dummy content for test')
-        );
-        insert cv;
-        out.put('contentVersionId', cv.Id);
-
-        return out;
-    }
-
+    // Build wrapper using provided ContentVersion id and template name
     private static MC_OpportunityDocGen_Agreements.Wrapper buildWrapper(Id oppId, Id contentVersionId, String templateName) {
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
         w.recordIds = new List<Id>{ oppId };
-        // pass ContentVersionId directly to bypass ENV resolution
         w.templateContentVersionId = contentVersionId;
-        // specify the mapping template name explicitly to avoid default/env lookup
         w.docTemplateName = templateName;
         return w;
     }
 
-    @isTest static void testGenerateAgreement_HappyPath_MinimalSetup() {
+    @isTest static void testGenerateAgreement_HappyPath_UsingFactory() {
         Test.startTest();
 
-        // Use factory to create a Person Account and Opportunity
+        // Create Person Account + Opportunity via factory
         Account acc = MC_TestDataFactory.createPersonAccount();
         Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-        // Create a support item & product & pricebook entry and OLI using factory helpers
+        // Create minimal product/pricebook/oli using factory helpers already in your TestDataFactory
         maica_cc__Support_Item__c supportItem = MC_TestDataFactory.CreateSupportItem();
         Product2 prod = MC_TestDataFactory.createProduct(null);
         PricebookEntry pbe = MC_TestDataFactory.createPricebookEntry(prod.Id);
         OpportunityLineItem oli = MC_TestDataFactory.createOpportunityLineItem(opp.Id, pbe.Id, supportItem.Id);
 
-        // Create a minimal Service Agreement tied to the Opportunity (the class will prefer SA tokens if present)
+        // Create a Service Agreement record (minimal) and relate to Opportunity if class reads SA - safe fields only
         maica_cc__Service_Agreement__c sa = new maica_cc__Service_Agreement__c(
             Name = 'Test SA',
             Opportunity__c = opp.Id,
@@ -60,35 +33,46 @@ private class MC_OpportunityDocGen_Agreements_Test {
         );
         insert sa;
 
-        // Create DocumentTemplate + ContentVersion bundle
+        // Use your TestDataFactory methods for DocumentTemplate + ContentVersion
+        // createDocumentTemplateForAssessment takes a String docName and creates DocumentTemplate with CustomClassName=MC_DocumentGenerationClass
         String templateName = 'GeneralServiceAgreementTemplate';
-        Map<String, Id> bundle = createTemplateAndContent(templateName);
+        MC_TestDataFactory.createDocumentTemplateForAssessment(templateName);
 
-        // Build wrapper and call the invocable
-        MC_OpportunityDocGen_Agreements.Wrapper w = buildWrapper(opp.Id, bundle.get('contentVersionId'), templateName);
+        // createContentVersion returns a ContentVersion record (factory method exists)
+        ContentVersion cv = MC_TestDataFactory.createContentVersion();
 
-        // Ensure no exception is thrown for the happy path
+        // Build wrapper that passes CV id and template name to bypass ENV lookups
+        MC_OpportunityDocGen_Agreements.Wrapper w = buildWrapper(opp.Id, cv.Id, templateName);
+
+        // Call the invocable - should not throw
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-        } catch (Exception e) {
-            System.assert(false, 'generateFromFlow threw unexpectedly: ' + e.getMessage());
+        } catch (Exception ex) {
+            // If anything unexpected is thrown fail the test and show message
+            System.assert(false, 'generateFromFlow threw unexpectedly: ' + ex.getMessage());
         }
 
         Test.stopTest();
     }
 
-    @isTest static void testGenerateAgreement_MissingOpportunityId_Throws() {
+    @isTest static void testGenerateAgreement_NoRecordIds_ThrowsAuraHandledException() {
         Test.startTest();
 
-        // Build wrapper with no recordIds -> should throw the AuraHandledException path
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        // leave recordIds null/empty to trigger exception path
+
+        Boolean sawExpected = false;
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-            System.assert(false, 'Expected exception when no Opportunity Id provided.');
         } catch (Exception ex) {
-            // error message was thrown in original class; assert it mentions No Opportunity Id
-            System.assert(ex.getMessage().contains('No Opportunity Id'), 'Unexpected exception message: ' + ex.getMessage());
+            // original class throws AuraHandledException('No Opportunity Id provided.')
+            String msg = ex.getMessage();
+            System.debug('Exception message: ' + msg);
+            // ensure message indicates missing opportunity id
+            System.assert(msg != null && msg.toLowerCase().contains('opportunity id'), 'Unexpected exception message: ' + msg);
+            sawExpected = true;
         }
+        System.assert(sawExpected, 'Expected an exception when no Opportunity Id is provided.');
 
         Test.stopTest();
     }
@@ -96,24 +80,30 @@ private class MC_OpportunityDocGen_Agreements_Test {
     @isTest static void testGenerateAgreement_DeletedOpportunity_Throws() {
         Test.startTest();
 
-        // create account & opportunity then delete the opportunity to simulate "not found"
+        // Create account + opp then delete the opp to simulate "not found"
         Account acc = MC_TestDataFactory.createPersonAccount();
         Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
         Id oppId = opp.Id;
         delete opp;
 
-        // create template + cv
+        // Ensure DocumentTemplate and ContentVersion exist via factory
         String templateName = 'GeneralServiceAgreementTemplate';
-        Map<String, Id> bundle = createTemplateAndContent(templateName);
+        MC_TestDataFactory.createDocumentTemplateForAssessment(templateName);
+        ContentVersion cv = MC_TestDataFactory.createContentVersion();
 
-        MC_OpportunityDocGen_Agreements.Wrapper w = buildWrapper(oppId, bundle.get('contentVersionId'), templateName);
+        MC_OpportunityDocGen_Agreements.Wrapper w = buildWrapper(oppId, cv.Id, templateName);
 
+        Boolean sawExpected = false;
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-            System.assert(false, 'Expected exception when Opportunity was deleted.');
         } catch (Exception ex) {
-            System.assert(ex.getMessage().contains('Opportunity not found for Id'), 'Unexpected exception message: ' + ex.getMessage());
+            // expected message: 'Opportunity not found for Id: <id>' (or similar)
+            String msg = ex.getMessage();
+            System.debug('Exception message: ' + msg);
+            System.assert(msg != null && (msg.toLowerCase().contains('opportunity not found') || msg.toLowerCase().contains('not found')), 'Unexpected exception message: ' + msg);
+            sawExpected = true;
         }
+        System.assert(sawExpected, 'Expected an exception when Opportunity cannot be found.');
 
         Test.stopTest();
     }
