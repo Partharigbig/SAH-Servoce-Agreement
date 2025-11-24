@@ -1,18 +1,17 @@
 @isTest
 private class MC_OpportunityDocGen_Agreements_Test {
 
-    // Helper to create a DocumentTemplate and ContentVersion for test and return wrapper-ready values
+    // small helper to create a DocumentTemplate + ContentVersion for tests
     private class TemplateBundle {
         public Id templateId;
         public Id contentVersionId;
         public String templateName;
     }
 
-    private static TemplateBundle createTemplateAndCV(String tmplName) {
+    private static TemplateBundle createTemplateAndCV(String name) {
         TemplateBundle tb = new TemplateBundle();
-        // Create DocumentTemplate (simple active one)
         DocumentTemplate dt = new DocumentTemplate(
-            Name = tmplName,
+            Name = name,
             IsActive = true,
             Type = 'MicrosoftWord',
             TokenMappingType = 'JSON'
@@ -21,18 +20,16 @@ private class MC_OpportunityDocGen_Agreements_Test {
         tb.templateId = dt.Id;
         tb.templateName = dt.Name;
 
-        // Create a ContentVersion to act as the DOCX file
         ContentVersion cv = new ContentVersion(
-            Title = tmplName + ' CV',
-            PathOnClient = tmplName + '.docx',
-            VersionData = Blob.valueOf('Dummy test content for ' + tmplName)
+            Title = name + 'CV',
+            PathOnClient = name + '.docx',
+            VersionData = Blob.valueOf('dummy')
         );
         insert cv;
         tb.contentVersionId = cv.Id;
         return tb;
     }
 
-    // Build wrapper for flow call
     private static MC_OpportunityDocGen_Agreements.Wrapper makeWrapper(Id oppId, Id cvId, String templateName) {
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
         w.recordIds = new List<Id>{ oppId };
@@ -41,91 +38,89 @@ private class MC_OpportunityDocGen_Agreements_Test {
         return w;
     }
 
-    @isTest static void testGenerateAgreement_HappyPath_FullData() {
+    @isTest static void testGenerateAgreement_HappyPath() {
         Test.startTest();
 
-        // 1) Create person account & opportunity
-        Account acct = MC_TestDataFactory.createPersonAccount();
-        Opportunity opp = MC_TestDataFactory.createOpportunity(acct.Id);
+        // 1) create person account + opportunity via factory
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-        // 2) Create Product, PricebookEntry and OpportunityLineItem (factory provides helper)
+        // 2) product + pbe + oli via factory (createProduct expects supportCategoryId but accepts null in your factory)
         maica_cc__Support_Item__c supportItem = MC_TestDataFactory.CreateSupportItem();
         Product2 prod = MC_TestDataFactory.createProduct(null);
         PricebookEntry pbe = MC_TestDataFactory.createPricebookEntry(prod.Id);
         OpportunityLineItem oli = MC_TestDataFactory.createOpportunityLineItem(opp.Id, pbe.Id, supportItem.Id);
 
-        // 3) Create Funding parent and Funding Items for all groups (AT, HM, Restorative, EOL)
+        // 3) Create Funding parent (minimal writable fields)
         maica_cc__Funding__c funding = new maica_cc__Funding__c(
-            Name = 'Test Funding',
+            Name = 'TF Funding',
             maica_cc__Start_Date__c = Date.today(),
             maica_cc__End_Date__c = Date.today().addMonths(6),
             Funding_Type__c = 'Home Care Package'
         );
         insert funding;
 
-        // Create several Funding Items with different budget types and amounts to exercise tier logic
-        List<maica_cc__Funding_Item__c> fiList = new List<maica_cc__Funding_Item__c>();
-        fiList.add(new maica_cc__Funding_Item__c(
-            Name = 'AT Small', maica_cc__Budget_Type__c = 'Assistive technology', maica_cc__Approved_Amount__c = 300,
-            maica_cc__Funding__c = funding.Id, maica_cc__Start_Date__c = Date.today(), maica_cc__End_Date__c = Date.today().addDays(10)
-        ));
-        fiList.add(new maica_cc__Funding_Item__c(
-            Name = 'AT Big', maica_cc__Budget_Type__c = 'Assistive technology', maica_cc__Approved_Amount__c = 4000,
-            maica_cc__Funding__c = funding.Id, maica_cc__Start_Date__c = Date.today().addDays(1), maica_cc__End_Date__c = Date.today().addDays(20)
-        ));
-        fiList.add(new maica_cc__Funding_Item__c(
-            Name = 'HM Mid', maica_cc__Budget_Type__c = 'Home modification', maica_cc__Approved_Amount__c = 1500,
-            maica_cc__Funding__c = funding.Id
-        ));
-        fiList.add(new maica_cc__Funding_Item__c(
-            Name = 'Restorative', maica_cc__Budget_Type__c = 'Restorative care pathway', maica_cc__Approved_Amount__c = 5000,
-            maica_cc__Funding__c = funding.Id
-        ));
-        fiList.add(new maica_cc__Funding_Item__c(
-            Name = 'EOL', maica_cc__Budget_Type__c = 'End of life pathway', maica_cc__Approved_Amount__c = 200,
-            maica_cc__Funding__c = funding.Id
-        ));
+        // 4) Create Funding Items (use only writeable fields)
+        List<maica_cc__Funding_Item__c> fiList = new List<maica_cc__Funding_Item__c>{
+            new maica_cc__Funding_Item__c(
+                Name = 'FI AT Small',
+                maica_cc__Budget_Type__c = 'Assistive technology',
+                maica_cc__Approved_Amount__c = 300,
+                maica_cc__Funding__c = funding.Id,
+                maica_cc__Start_Date__c = Date.today()
+            ),
+            new maica_cc__Funding_Item__c(
+                Name = 'FI HM Mid',
+                maica_cc__Budget_Type__c = 'Home modification',
+                maica_cc__Approved_Amount__c = 1500,
+                maica_cc__Funding__c = funding.Id
+            ),
+            new maica_cc__Funding_Item__c(
+                Name = 'FI Restorative',
+                maica_cc__Budget_Type__c = 'Restorative care pathway',
+                maica_cc__Approved_Amount__c = 5000,
+                maica_cc__Funding__c = funding.Id
+            )
+        };
         insert fiList;
 
-        // 4) Create Entitlements tied to some Funding Items (AT & HM)
+        // 5) Entitlements referencing funding items (only writeable fields)
         List<maica_cc__Entitlement__c> entList = new List<maica_cc__Entitlement__c>();
-        for (Integer i = 0; i < Math.min(3, fiList.size()); i++) {
-            maica_cc__Funding_Item__c fi = fiList[i];
-            maica_cc__Entitlement__c e = new maica_cc__Entitlement__c(
-                Name = 'Ent for ' + fi.Name,
+        for (Integer i = 0; i < fiList.size(); i++) {
+            entList.add(new maica_cc__Entitlement__c(
+                Name = 'Ent ' + i,
                 maica_cc__Approved_Amount__c = 100 * (i + 1),
-                maica_cc__Funding_Item__c = fi.Id
-            );
-            entList.add(e);
+                maica_cc__Funding_Item__c = fiList[i].Id
+            ));
         }
         insert entList;
 
-        // 5) Create Approved Services (child of Funding)
-        List<maica_cc__Approved_Service__c> appServices = new List<maica_cc__Approved_Service__c>();
-        appServices.add(new maica_cc__Approved_Service__c(Name = 'AppService1', maica_cc__Funding__c = funding.Id));
-        appServices.add(new maica_cc__Approved_Service__c(Name = 'AppService2', maica_cc__Funding__c = funding.Id));
-        insert appServices;
+        // 6) Approved services - minimal fields
+        List<maica_cc__Approved_Service__c> asList = new List<maica_cc__Approved_Service__c>{
+            new maica_cc__Approved_Service__c(Name='AS 1', maica_cc__Funding__c = funding.Id),
+            new maica_cc__Approved_Service__c(Name='AS 2', maica_cc__Funding__c = funding.Id)
+        };
+        insert asList;
 
-        // 6) Update opportunity to reference Funding and Funding Source so pickEnvByFunding won't use defaults unexpectedly
+        // 7) Update opportunity to reference funding and funding source to exercise pickEnvKey path
         opp.Funding__c = funding.Id;
         opp.Funding_Source__c = 'Support at Home';
         update opp;
 
-        // 7) Create a ContactContactRelation (PoA or Carer) for the account's PersonContactId
-        // Create another person account to act as related contact then create CCR
+        // 8) Create a related person account to act as a related contact, then insert ContactContactRelation
         Account related = MC_TestDataFactory.createPersonAccount();
         ContactContactRelation ccr = new ContactContactRelation(
-            ContactId = acct.PersonContactId,
+            ContactId = acc.PersonContactId,
             RelatedContactId = related.PersonContactId,
             Power_of_Attorney__c = true,
-            Relationship__c = 'Son',
+            Relationship__c = 'Child',
             Next_of_Kin__c = true
         );
         insert ccr;
 
-        // 8) Create a Service Agreement record (so process can fallback to sa fields)
+        // 9) Create Service Agreement (minimal writable fields)
         maica_cc__Service_Agreement__c sa = new maica_cc__Service_Agreement__c(
-            Name = 'Test SA',
+            Name = 'SA Test',
             Opportunity__c = opp.Id,
             maica_cc__Start_Date__c = Date.today(),
             maica_cc__End_Date__c = Date.today().addMonths(12),
@@ -133,53 +128,45 @@ private class MC_OpportunityDocGen_Agreements_Test {
         );
         insert sa;
 
-        // 9) Create template + CV
+        // 10) Create template + CV and call the method
         TemplateBundle tb = createTemplateAndCV('GeneralServiceAgreementTemplate');
-
-        // 10) Build wrapper and call generateFromFlow; should not throw
         MC_OpportunityDocGen_Agreements.Wrapper w = makeWrapper(opp.Id, tb.contentVersionId, tb.templateName);
 
-        // Run the method
+        // method should execute without throwing
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-        } catch (Exception ex) {
-            System.assert(false, 'Happy path should not throw. Error: ' + ex.getMessage());
+        } catch (Exception e) {
+            System.assert(false, 'Unexpected exception on happy path: ' + e.getMessage());
         }
 
         Test.stopTest();
-
-        // Minimal assertion — if we reached here it's success
-        System.assert(true, 'generateFromFlow executed without exception on happy path.');
     }
 
-    @isTest static void testGenerateAgreement_InvalidInput_Throws() {
+    @isTest static void testGenerateAgreement_MissingId_Throws() {
         Test.startTest();
-        // empty wrapper should throw 'No Opportunity Id provided.'
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-            System.assert(false, 'Expected AuraHandledException for missing Opportunity Id.');
+            System.assert(false, 'Expected exception for missing record id.');
         } catch (Exception ex) {
-            System.assert(ex.getMessage().contains('No Opportunity Id'), 'Unexpected exception text: ' + ex.getMessage());
+            System.assert(ex.getMessage().contains('No Opportunity Id'), 'Unexpected message: ' + ex.getMessage());
         }
         Test.stopTest();
     }
 
-    @isTest static void testGenerateAgreement_NonExistentOpportunity_Throws() {
+    @isTest static void testGenerateAgreement_DeletedOpportunity_Throws() {
         Test.startTest();
         Account a = MC_TestDataFactory.createPersonAccount();
         Opportunity o = MC_TestDataFactory.createOpportunity(a.Id);
-        Id missingId = o.Id;
-        delete o; // now id is valid format but record missing
+        Id oid = o.Id;
+        delete o; // remove the opportunity
 
-        // create CV so the method doesn't error earlier
         TemplateBundle tb = createTemplateAndCV('GeneralServiceAgreementTemplate_Missing');
-
-        MC_OpportunityDocGen_Agreements.Wrapper w = makeWrapper(missingId, tb.contentVersionId, tb.templateName);
+        MC_OpportunityDocGen_Agreements.Wrapper w = makeWrapper(oid, tb.contentVersionId, tb.templateName);
 
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
-            System.assert(false, 'Expected AuraHandledException when Opportunity record not found.');
+            System.assert(false, 'Expected exception when opportunity not found.');
         } catch (Exception ex) {
             System.assert(ex.getMessage().contains('Opportunity not found for Id'), 'Unexpected message: ' + ex.getMessage());
         }
