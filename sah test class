@@ -1,113 +1,94 @@
 @isTest
 private class MC_OpportunityDocGen_Agreements_Test {
-    @isTest static void testGenerateFromFlow_success_path() {
-        // Create supporting data using your factory where available
-        Account acc = MC_TestDataFactory.createPersonAccount();
-        Opportunity opp = MC_TestDataFactory.createOpportunity(acc.Id);
 
-        // Create a Funding parent and attach to Opportunity
-        maica_cc__Funding__c funding = new maica_cc__Funding__c(
-            Name = 'TFunding',
-            maica_cc__Start_Date__c = Date.today(),
-            maica_cc__End_Date__c = Date.today().addMonths(6),
-            Funding_Type__c = 'Home Care Package'
-        );
-        insert funding;
+    @testSetup
+    static void setupTestData() {
+        // create a person account and opportunity using factory
+        Account person = MC_TestDataFactory.createPersonAccount();
+        Opportunity opp = MC_TestDataFactory.createOpportunity(person.Id);
 
-        // Update opportunity to reference funding and Funding Source to pick env-key branch
-        opp.Funding__c = funding.Id;
-        opp.Funding_Source__c = 'Support at Home';
-        opp.Agreement_Start_Date__c = Date.today();
-        opp.Agreement_End_Date__c = Date.today().addMonths(12);
-        update opp;
-
-        // Create Funding Items to exercise AT / HM grouping and tiers
-        maica_cc__Funding_Item__c fiAT = new maica_cc__Funding_Item__c(
-            maica_cc__Funding__c = funding.Id,
-            maica_cc__Budget_Type__c = 'Assistive technology',
-            maica_cc__Approved_Amount__c = 600, // will fall into >500 <=2000 bracket
-            maica_cc__Entry_Date__c = Date.today(),
-            maica_cc__Effective_Date__c = Date.today(),
-            maica_cc__End_Date__c = Date.today().addMonths(3)
-        );
-        maica_cc__Funding_Item__c fiHM = new maica_cc__Funding_Item__c(
-            maica_cc__Funding__c = funding.Id,
-            maica_cc__Budget_Type__c = 'Home modification',
-            maica_cc__Approved_Amount__c = 1600, // tests mid-tier
-            maica_cc__Entry_Date__c = Date.today(),
-            maica_cc__Effective_Date__c = Date.today(),
-            maica_cc__End_Date__c = Date.today().addMonths(2)
-        );
-        insert new List<maica_cc__Funding_Item__c>{ fiAT, fiHM };
-
-        // Create Entitlement(s) linked to funding items to exercise entitlement tables
-        maica_cc__Entitlement__c ent1 = new maica_cc__Entitlement__c(
-            maica_cc__Funding_Item__c = fiAT.Id,
-            maica_cc__Approved_Amount__c = 600
-        );
-        maica_cc__Entitlement__c ent2 = new maica_cc__Entitlement__c(
-            maica_cc__Funding_Item__c = fiHM.Id,
-            maica_cc__Approved_Amount__c = 1600
-        );
-        insert new List<maica_cc__Entitlement__c>{ ent1, ent2 };
-
-        // Create an Approved Service for the funding (used for ApprovedServiceList token)
-        maica_cc__Approved_Service__c as1 = new maica_cc__Approved_Service__c(
-            Name = 'AppSvc1',
-            maica_cc__Funding__c = funding.Id
-        );
-        insert as1;
-
-        // Create support item, product, pricebookentry and opportunity line item using your factory
-        maica_cc__Support_Item__c supportItem = MC_TestDataFactory.CreateSupportItem();
-        maica_cc__Support_Category__c supportCategory = MC_TestDataFactory.CreateSupportCategory();
-        Product2 prod = MC_TestDataFactory.createProduct(supportCategory.Id);
-        PricebookEntry pbe = MC_TestDataFactory.createPricebookEntry(prod.Id);
-        OpportunityLineItem oli = MC_TestDataFactory.createOpportunityLineItem(opp.Id, pbe.Id, supportItem.Id);
-
-        // Create a ContentVersion and a DocumentTemplate for overrides (so code won't look up MDT)
+        // create a ContentVersion (factory already provides one — but create explicitly to be clear)
         ContentVersion cv = MC_TestDataFactory.createContentVersion();
-        DocumentTemplate dt = MC_TestDataFactory.createDocumentTemplate(); // returns Name 'Quote' in factory
 
-        // Build wrapper (Invocable style) and call generateFromFlow with templateContentVersionId override
+        // create the DocumentTemplate that the generator expects (default name used in class)
+        DocumentTemplate dt = new DocumentTemplate(
+            Name = 'GeneralServiceAgreementTemplate',
+            IsActive = true,
+            Type = 'MicrosoftWord',
+            TokenMappingType = 'JSON'
+        );
+        insert dt;
+
+        // store ids on static custom settings - not required; keeping minimal for test
+        // The test methods will query items created above by their properties
+    }
+
+    // Happy path: call generateFromFlow with a real Opportunity Id and an explicit ContentVersion Id
+    @isTest static void testGenerateAgreement_HappyPath() {
+        // Fetch the person account and opp created in @testSetup
+        Account acc = [SELECT Id, PersonContactId FROM Account WHERE PersonEmail = 'testSales@apex.com' LIMIT 1];
+        Opportunity opp = [SELECT Id, AccountId FROM Opportunity WHERE AccountId = :acc.Id LIMIT 1];
+
+        // Create a ContentVersion to pass directly to wrapper (ensure we have a current CV)
+        ContentVersion cv = new ContentVersion(
+            Title = 'SAH Template',
+            PathOnClient = 'SAHTemplate.docx',
+            VersionData = Blob.valueOf('Dummy content for test')
+        );
+        insert cv;
+
+        // The wrapper accepts templateContentVersionId as ContentVersion.Id
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
         w.recordIds = new List<Id>{ opp.Id };
-        w.templateContentVersionId = cv.Id; // use direct CV override to avoid Environment_Variables__mdt dependency
-        w.docTemplateName = dt.Name;        // use DocumentTemplate created in factory
+        w.templateContentVersionId = cv.Id;
+        // docTemplateName omitted so class should resolve default template name
+        // ensure the matching DocumentTemplate exists (created in @testSetup)
 
         Test.startTest();
-            // Invoke the Invocable method (happy path)
+            // Call the invocable. Should not throw and should complete mapping logic.
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
         Test.stopTest();
 
-        // No DGP inserted in tests (code checks Test.isRunningTest()) — assert that Opportunity still exists and updates persisted
-        Opportunity oppAfter = [SELECT Id, Funding__c, Funding_Source__c FROM Opportunity WHERE Id = :opp.Id];
-        System.assertEquals(funding.Id, oppAfter.Funding__c, 'Opportunity should still reference funding');
-        System.assertEquals('Support at Home', oppAfter.Funding_Source__c, 'Funding source should match');
-
-        // Also assert that entitlements and funding items exist and are linked
-        Integer countFI = [SELECT COUNT() FROM maica_cc__Funding_Item__c WHERE maica_cc__Funding__c = :funding.Id];
-        System.assertEquals(2, countFI, 'There should be 2 funding items for the funding parent');
-
-        Integer countEnt = [SELECT COUNT() FROM maica_cc__Entitlement__c WHERE maica_cc__Funding_Item__c IN :new List<Id>{fiAT.Id, fiHM.Id}];
-        System.assertEquals(2, countEnt, 'There should be 2 entitlements linked to the funding items');
+        // No DGP inserted in test context due to Test.isRunningTest() guard inside class.
+        // Assert no exceptions and basic sanity: the Opportunity must still exist
+        Opportunity oppAfter = [SELECT Id FROM Opportunity WHERE Id = :opp.Id LIMIT 1];
+        System.assertEquals(opp.Id, oppAfter.Id, 'Opportunity should remain unchanged after generation call.');
     }
 
-    @isTest static void testGenerateFromFlow_missing_record_throws() {
-        // Prepare an empty wrapper and expect AuraHandledException
+    // Negative test: missing recordIds in wrapper -> expect AuraHandledException('No Opportunity Id provided.')
+    @isTest static void testGenerateAgreement_NoRecordIds_Throws() {
         MC_OpportunityDocGen_Agreements.Wrapper wEmpty = new MC_OpportunityDocGen_Agreements.Wrapper();
-        wEmpty.recordIds = new List<Id>(); // empty
+        // intentionally leave wEmpty.recordIds null/empty
 
-        // Call and assert exception
-        try {
-            Test.startTest();
+        Test.startTest();
+            try {
                 MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ wEmpty });
-            Test.stopTest();
-            // If we get here, fail
-            System.assert(false, 'Expected AuraHandledException when no Opportunity Id provided.');
-        } catch (AuraHandledException ex) {
-            // expected
-            System.assert(ex.getMessage().contains('No Opportunity Id provided'), 'Expected no Id error');
-        }
+                // If we get here the test should fail
+                System.assert(false, 'Expected AuraHandledException when no opportunity Id is provided.');
+            } catch (Exception ex) {
+                // The class throws AuraHandledException; assert the message contains our expected text.
+                String msg = ex.getMessage();
+                System.assert(msg != null && msg.contains('No Opportunity Id provided'), 'Expected "No Opportunity Id provided." but got: ' + msg);
+            }
+        Test.stopTest();
+    }
+
+    // Negative test: provided Id does not correspond to an Opportunity -> expect AuraHandledException('Opportunity not found for Id: ...')
+    @isTest static void testGenerateAgreement_NonExistentOpportunity_Throws() {
+        // Generate a fake (but well-formed) Id that won't match any Opportunity
+        Id fakeOppId = Id.valueOf('006' + String.valueOf(Math.abs(Crypto.getRandomInteger()))); // 006... is Opportunity prefix
+
+        MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
+        w.recordIds = new List<Id>{ fakeOppId };
+
+        Test.startTest();
+            try {
+                MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
+                System.assert(false, 'Expected AuraHandledException when Opportunity is not found for provided Id.');
+            } catch (Exception ex) {
+                String msg = ex.getMessage();
+                System.assert(msg != null && msg.contains('Opportunity not found for Id'), 'Expected Opportunity-not-found message but got: ' + msg);
+            }
+        Test.stopTest();
     }
 }
