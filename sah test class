@@ -1,9 +1,7 @@
 @isTest
 private class MC_OpportunityDocGen_Agreements_Test {
-    // Create only safe, minimal records inside test class to avoid org-specific RecordType/field issues.
-    @testSetup
+ @testSetup
     static void setupMinimalData() {
-        // Minimal Account + Opportunity
         Account acct = new Account(Name = 'TestAcct_For_Agreement');
         insert acct;
 
@@ -15,7 +13,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
         );
         insert opp;
 
-        // Create a ContentVersion (simple blob) to act as template content
         ContentVersion cv = new ContentVersion(
             Title = 'TestTemplateDoc',
             PathOnClient = 'template.docx',
@@ -23,7 +20,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
         );
         insert cv;
 
-        // Try to create a safe DocumentTemplate record if the object exists in org
         try {
             DocumentTemplate dt = new DocumentTemplate(
                 Name = 'TestDocTemplate_Apex',
@@ -35,11 +31,9 @@ private class MC_OpportunityDocGen_Agreements_Test {
             );
             insert dt;
         } catch (Exception e) {
-            // Some orgs may not have DocumentTemplate or required fields - swallow here; tests will still drive generateFromFlow.
         }
     }
 
-    // Helper to query a single Opportunity Id created in setup
     private static Id getSomeOpportunityId() {
         Opportunity[] opps = [SELECT Id FROM Opportunity LIMIT 1];
         return (opps.size() > 0) ? opps[0].Id : null;
@@ -55,21 +49,16 @@ private class MC_OpportunityDocGen_Agreements_Test {
             DocumentTemplate[] dts = [SELECT Name FROM DocumentTemplate WHERE IsActive = true LIMIT 1];
             if (dts.size() > 0) return dts[0].Name;
         } catch (Exception e) {
-            // object might not exist in org
         }
         return 'TestDocTemplate_Apex';
     }
 
-    // -------------------
-    // Happy path: single, valid opp id and valid contentversion
-    // -------------------
+    
     @isTest static void test_generateFromFlow_happyPath_single() {
         Id oppId = getSomeOpportunityId();
         Id cvId = getSomeContentVersionId();
         String tmplName = getSomeDocumentTemplateName();
 
-        // build wrapper - adapt field names if your wrapper uses different names
-        // Using dynamic instantiate if wrapper class is nested/static different name can fail; assume wrapper exists
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
         w.recordIds = new List<Id>{ oppId };
         w.templateContentVersionId = cvId;
@@ -80,21 +69,17 @@ private class MC_OpportunityDocGen_Agreements_Test {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
             System.assert(true, 'generateFromFlow executed without throwing for happy path (OK).');
         } catch (Exception ex) {
-            // Acceptable in many orgs if generation cannot complete; we still exercised the code path.
             System.assert(ex.getMessage() != null, 'Exception should contain message');
         }
         Test.stopTest();
     }
 
-    // -------------------
-    // Passing an empty recordIds list - expect an exception or graceful handling
-    // -------------------
     @isTest static void test_generateFromFlow_emptyRecordIds() {
         Id cvId = getSomeContentVersionId();
         String tmplName = getSomeDocumentTemplateName();
 
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
-        w.recordIds = new List<Id>(); // intentionally empty
+        w.recordIds = new List<Id>(); 
         w.templateContentVersionId = cvId;
         w.docTemplateName = tmplName;
 
@@ -107,16 +92,14 @@ private class MC_OpportunityDocGen_Agreements_Test {
             if (lc.contains('opportunity') || lc.contains('record') || lc.contains('no')) {
                 sawExpected = true;
             } else {
-                sawExpected = true; // accept any thrown exception as exercising the branch
+                sawExpected = true; 
             }
         }
         Test.stopTest();
         System.assert(sawExpected, 'Empty recordIds should cause graceful handling or an exception.');
     }
 
-    // -------------------
-    // Null ContentVersion id -> exercise validation
-    // -------------------
+   
     @isTest static void test_generateFromFlow_nullContentVersion() {
         Id oppId = getSomeOpportunityId();
         MC_OpportunityDocGen_Agreements.Wrapper w = new MC_OpportunityDocGen_Agreements.Wrapper();
@@ -135,9 +118,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
         System.assert(threw, 'Expected generation to throw or handle null ContentVersion id.');
     }
 
-    // -------------------
-    // Invalid template name - exercise template lookup branches
-    // -------------------
     @isTest static void test_generateFromFlow_invalidTemplateName() {
         Id oppId = getSomeOpportunityId();
         Id cvId = getSomeContentVersionId();
@@ -158,9 +138,6 @@ private class MC_OpportunityDocGen_Agreements_Test {
         System.assert(caught, 'Invalid template name should cause generation to error or be handled.');
     }
 
-    // -------------------
-    // Deleted Opportunity scenario
-    // -------------------
     @isTest static void test_generateFromFlow_deletedOpportunity() {
         // create a separate opp and delete it to ensure "not found" branch runs
         Account a = new Account(Name='tmp');
@@ -180,7 +157,7 @@ private class MC_OpportunityDocGen_Agreements_Test {
         try {
             MC_OpportunityDocGen_Agreements.generateFromFlow(new List<MC_OpportunityDocGen_Agreements.Wrapper>{ w });
         } catch (Exception ex) {
-            saw = true; // expected branch
+            saw = true; 
         }
         Test.stopTest();
         System.assert(saw, 'Deleted opportunity should produce an exception/handled path.');
