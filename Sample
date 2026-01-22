@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>Request an Aged Care Volunteer Visitor</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    h3 {
+      margin-top: 30px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 5px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input, select, textarea {
+      width: 350px;
+      padding: 6px;
+      margin-top: 4px;
+    }
+    textarea {
+      height: 70px;
+    }
+    .note {
+      font-size: 13px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+<form action="https://test.salesforce.com/servlet/servlet.WebToLead?encoding=UTF-8&orgId=00DBm000005mwev"
+      method="POST">
+
+<input type="hidden" name="oid" value="00DBm000005mwev">
+<input type="hidden" name="retURL" value="http://">
+
+<!-- ================= CARE RECIPIENT DETAILS ================= -->
+
+<h3>Care Recipient Details</h3>
+
+<label>Title</label>
+<input id="title" name="title" type="text">
+
+<label>First Name</label>
+<input id="first_name" name="first_name" type="text">
+
+<label>Last Name</label>
+<input id="last_name" name="last_name" type="text">
+
+<label>Email</label>
+<input id="email" name="email" type="text">
+
+<label>Phone Number</label>
+<input id="phone" name="phone" type="text">
+
+<label>Aged Care Service</label>
+<select id="00NBm00000CEohB" name="00NBm00000CEohB">
+  <option value="">--None--</option>
+  <option value="RACS">RACS</option>
+  <option value="SAH">SAH</option>
+  <option value="Awaiting SAH">Awaiting SAH</option>
+</select>
+
+<label>Care Organisation</label>
+<input id="00NBm00000CEofZ" name="00NBm00000CEofZ" type="text">
+
+<label>Gender Identity</label>
+<select id="00NBm00000CEosT" name="00NBm00000CEosT">
+  <option value="">--None--</option>
+  <option value="Male">Male</option>
+  <option value="Female">Female</option>
+  <option value="Non-binary">Non-binary</option>
+  <option value="Transgender Male">Transgender Male</option>
+  <option value="Transgender Female">Transgender Female</option>
+  <option value="Gender Diverse/Non-conforming">Gender Diverse/Non-conforming</option>
+  <option value="Intersex">Intersex</option>
+  <option value="Other(please specify)">Other (please specify)</option>
+  <option value="Unknown">Unknown</option>
+</select>
+
+<label>Date of Birth</label>
+<input id="00N9p000005Ajgv" name="00N9p000005Ajgv" type="text">
+
+<label>Country of Origin</label>
+<select id="00NBm00000CEp29" name="00NBm00000CEp29">
+  <option value="">--None--</option>
+  <option value="Australia">Australia</option>
+  <option value="India">India</option>
+  <option value="United Kingdom">United Kingdom</option>
+  <option value="United States">United States</option>
+</select>
+
+<label>Preferred Language</label>
+<select id="00N9p000005Ah4Y" name="00N9p000005Ah4Y">
+  <option value="">--None--</option>
+  <option value="English">English</option>
+  <option value="Mandarin">Mandarin</option>
+  <option value="Arabic">Arabic</option>
+  <option value="Vietnamese">Vietnamese</option>
+</select>
+
+<label>Address</label>
+<textarea name="street"></textarea>
+
+<label>City</label>
+<input name="city" type="text">
+
+<label>State / Province</label>
+<input name="state" type="text">
+
+<label>Postcode</label>
+<input name="zip" type="text">
+
+<label>Country</label>
+<input name="country" type="text">
+
+<label>Service Request</label>
+<select id="00N9p000005AkzZ" name="00N9p000005AkzZ">
+  <option value="">--None--</option>
+  <option value="ACVVS">ACVVS</option>
+</select>
+
+<label>Lead Source</label>
+<select id="lead_source" name="lead_source">
+  <option value="">--None--</option>
+  <option value="Company Website">Company Website</option>
+</select>
+
+<label>Status</label>
+<select id="Status" name="Status">
+  <option value="">--None--</option>
+  <option value="New">New</option>
+</select>
+
+<!-- ================= ADDITIONAL CARE RECIPIENT DETAILS ================= -->
+
+<h3>Additional Care Recipient Details</h3>
+
+<label>Reason for Referral</label>
+<textarea id="00NBm00000CEoUJ" name="00NBm00000CEoUJ"></textarea>
+
+<label>Background (work, family, culture)</label>
+<textarea id="00NBm00000CEp3l" name="00NBm00000CEp3l"></textarea>
+
+<label>Hobbies and Interests</label>
+<textarea id="00NBm00000CEp5N" name="00NBm00000CEp5N"></textarea>
+
+<label>Suggested Activities</label>
+<textarea id="00NBm00000CEp6z" name="00NBm00000CEp6z"></textarea>
+
+<label>Health Status</label>
+<textarea id="00NBm00000CEmcC" name="00NBm00000CEmcC"></textarea>
+
+<!-- ================= VISITOR / VOLUNTEER PREFERENCES ================= -->
+
+<h3>Visitor / Volunteer Preferences</h3>
+
+<label>Gender Preference</label>
+<input id="00NBm00000CEp8b" name="00NBm00000CEp8b" type="text">
+
+<label>Age Preference</label>
+<input id="00NBm00000CEpBp" name="00NBm00000CEpBp" type="text">
+
+<label>Language / Cultural Preference</label>
+<input id="00NBm00000CEnWd" name="00NBm00000CEnWd" type="text">
+
+<label>LGBTIQ+ Visitor Preference</label>
+<input id="00NBm00000CEpDR" name="00NBm00000CEpDR" type="text">
+
+<label>Other Preferences</label>
+<input id="00NBm00000CEpF3" name="00NBm00000CEpF3" type="text">
+
+<!-- ================= REFERRER DETAILS ================= -->
+
+<h3>Referrer Details</h3>
+
+<label>Title</label>
+<select id="00NBm00000CEpIH" name="00NBm00000CEpIH">
+  <option value="">--None--</option>
+  <option value="Mr">Mr</option>
+  <option value="Mrs">Mrs</option>
+  <option value="Ms">Ms</option>
+</select>
+
+<label>Name</label>
+<input id="00NBm00000CEoMH" name="00NBm00000CEoMH" type="text">
+
+<label>Email</label>
+<input id="00NBm00000CEpN7" name="00NBm00000CEpN7" type="text">
+
+<label>Phone</label>
+<input id="00NBm00000CEpQL" name="00NBm00000CEpQL" type="text">
+
+<label>Relationship</label>
+<select id="00NBm00000CEont" name="00NBm00000CEont">
+  <option value="">--None--</option>
+  <option value="Friend">Friend</option>
+  <option value="Family">Family</option>
+</select>
+
+<label>Organisation</label>
+<input id="00NBm00000CEpYP" name="00NBm00000CEpYP" type="text">
+
+<!-- ================= SPECIAL NEEDS GROUP ================= -->
+
+<h3>Special Needs Group</h3>
+
+<p class="note">
+The following information is requested by the Department of Health and will be kept confidential.
+</p>
+
+<label>Special Needs Group</label>
+<select name="Special_Needs_Group__c" multiple>
+  <option value="Aboriginal">Aboriginal</option>
+  <option value="CALD">CALD</option>
+  <option value="LGBTIQ+">LGBTIQ+</option>
+  <option value="Veteran">Veteran</option>
+  <option value="Rural">Rural</option>
+</select>
+
+<label>
+  <input type="checkbox" name="Consent__c" value="1" required>
+  The recipient consents to being part of the program and sharing these details.
+</label>
+
+<br><br>
+
+<input type="submit" value="Submit Request">
+
+</form>
+
+</body>
+</html>
