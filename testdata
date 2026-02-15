@@ -1,0 +1,101 @@
+{"ClientAlert":"Test Alert for NDIS\n\nHello this is the alert for NDIS client by Partha\n\nError not Querying","maicaAlerts":[{"AlertFormattedMessage":"","AlertMessage":"Test Alert for NDIS","Id":"a3CBm00000AgyObMAJ","FinalAlertMessage":"Test Alert for NDIS"},{"AlertFormattedMessage":"<p>Hello {!Name} this is the alert for NDIS client by Partha</p>","AlertMessage":"","Id":"a3CBm00000AgyQDMAZ","FinalAlertMessage":"<p>Hello {!Name} this is the alert for NDIS client by Partha</p>"},{"AlertFormattedMessage":"<p>Error not Querying</p>","AlertMessage":"","Id":"a3CBm00000Ah9OrMAJ","FinalAlertMessage":"<p>Error not Querying</p>"},{"AlertFormattedMessage":"<p>Warning {!Name} have high glucose level, diabetic prone</p>","AlertMessage":"","Id":"a3CBm00000AhqQbMAJ","FinalAlertMessage":"<p>Warning {!Name} have high glucose level, diabetic prone</p>"}],"NDISClinetProfile":{"ContactInformation":{"Name":"Justin Timberlake","PurposeOfShiftOrShiftDetails":"Test","LivingArrangements":"SINGLE","AccessToProperty":"TesttoNDIS"},"Allergies":[{"AllergyType":"Medication","AdditionalNotes":"No need tabs","Allergy":"Tablets"},{"AllergyType":"Food","AdditionalNotes":"Sea food intolerance L","Allergy":"Sea food"},{"AllergyType":"Food","AdditionalNotes":"No chicken","Allergy":"Chicken liver"},{"AllergyType":"Food","AdditionalNotes":"No Mutton","Allergy":"Mutton"},{"AllergyType":"Food","AdditionalNotes":"Do prescribe other","Allergy":"Chicken liver"}],"MedicalInformation":[{"NotesComments":"Test","ClinicalTreatmentProvided":"Compression Stockings","MedicalConditionsDisabilitiesName":"Cardiac condition"},{"NotesComments":"TImber Test2","ClinicalTreatmentProvided":"Catheter management (SPC)","MedicalConditionsDisabilitiesName":"Cardiac condition"},{"NotesComments":null,"ClinicalTreatmentProvided":"Catheter management (IDC)","MedicalConditionsDisabilitiesName":"Blood and lymphatic system condition"},{"NotesComments":"No note","ClinicalTreatmentProvided":"Urge Incontinence","MedicalConditionsDisabilitiesName":"Endocrine condition"},{"NotesComments":"nO ConditiON","ClinicalTreatmentProvided":"Wound Management","MedicalConditionsDisabilitiesName":"Congenital, familial and genetic condition"},{"NotesComments":"Test Test Test","ClinicalTreatmentProvided":"Wound Management","MedicalConditionsDisabilitiesName":"Congenital, familial and genetic condition"},{"NotesComments":"Nil note. Will add in future","ClinicalTreatmentProvided":"Urge Incontinence","MedicalConditionsDisabilitiesName":"Skin and subcutaneous tissue condition"}],"ExistingClientPlan":"Asthma;Anaphylaxis;Epilepsy;Behaviour Support Plan;Nil","Disabilities":{"DisabilityTypeDescription":"Test"},"Medications":{"PromptMedication":true,"AssistWithMedication":true,"FullAssistance":true,"MedicalAssistanceWithMedication":"Test"},"Continence":{"ContinenceInformation":"Test"},"Behavioural":{"BehaviouralConcernsPastorPresent":"Test"},"CommsSection":{"Communication":"Test"},"Vision":{"DoesTheClientWearGlasses":"Yes","VisionProblems":"Yes","VisionComments":"Test"},"Hearing":{"DoesTheClientWearAHearingAid":"Yes","HearingProblems":"Yes","HearingComments":"Test"},"DietaryInformation":{"DietaryComments":"Test","FavouriteFoods":"Test","NutritionAndFluidAssistanceNeeded":"Test","PreferredDiet":"Test"},"Mobility":{"MobilityAids":"Test","DescribeClientsMobilityWalking":"Test","FallsInLast6Months":"Yes"},"LanguageOrCulture":{"InterpreterRequired":"9","ProvideDetails":"Test","ReligiousCulturalPractices":"Yes","Languagespoken":"English , Kriol","LanguageComments":"Test"},"AdditionalInformation":{"ServicesAvailable":{"DomesticAssistance":true,"AccessToCommunity":true,"AssistanceWithActivitiesOfDailyLiving":true},"LoneWorkerScreen":{"DoesTheParticipantLiveAlone":"Yes","LoneRiskScore":"Test","RequireAssistanceWithDailyActivities":"Yes"}},"NDISEmergencyPlan":{"Emergencysafeplacecontact":"Family Member;Neighbour;Other service provider;Other","LifeSaving":"Test","AssistedTech":"Test","EmergencySafePlace":"Test","ReceivingEssentialServicesFromMecwacare":"Yes","LifeSavingequipment":"Yes","AssistedTechnology":"Yes","Doyouhaveapersonalemergencyplan":"Yes"},"Block1":null},"omniscriptId":"0jNBm000002Do4HMAS","language":"English","type":"Assessment","subType":"NDISClientProfile","sId":"0jNBm000002Do4HMAS","runMode":"preview","theme":"lightning","ContextId":"a5YBm000000OqWvMAK","LanguageCode":"en_US","userProfile":"System Administrator","timeStamp":"2026-02-15T09:39:57.690Z","userTimeZoneName":"Australia/Melbourne","userTimeZone":"660","userCurrencyCode":"AUD","userName":"s.parthasarathy@mecwacare.org.au.mecwar2dev","userId":"005Bm00000GCKwDIAX","omniProcessId":"0jNBm000002Do4HMAS","localTimeZoneName":"Asia/Calcutta","AssessmentName":"Justin Timberlake_NDISData","RelatedAccount":"001Bm00000hwWTQIA2","AssessmentStatus":"","AssessmentId":"","CurrentStatus":"In Progress","RelatedAssessment":"","FormObjectAPIName":"NDIS_Client_Profile__c","ResolvedClientAlerts":"Test Alert for NDIS\n\nHello  this is the alert for NDIS client by Partha\n\nError not Querying\n\nWarning  have high glucose level, diabetic prone"}
+
+in this json there is an merge field {!Name}, I need that to printNDISClinetProfile": {
+    "ContactInformation": {
+      "Name": "Justin Timberlake" i mean the name instead of the merge field I have created the lwc and i am trying this in this below js i cant able to print it. So i need you to help me to print without changing other exisiting functionalies
+
+import { LightningElement, api } from 'lwc';
+import { OmniscriptBaseMixin } from 'omnistudio/omniscriptBaseMixin';
+ 
+export default class ndisClientAlerts extends OmniscriptBaseMixin(LightningElement) {
+ 
+    @api ClientAlert;
+    @api maicaAlerts;
+    //@api NDISClinetProfile;
+ 
+    resolvedClientAlerts = '';
+ 
+    connectedCallback() {
+        try {
+            this.resolveAlerts();
+        } catch (e) {
+            console.error('Alert Error:', e);
+        }
+    }
+ 
+    resolveAlerts() {
+ 
+        let alertsArray = [];
+ 
+        // Correct JSON path you confirmed
+        const clientName =
+            this.OmniJsonData?.NDISClinetProfile?.ContactInformation?.Name || '';
+ 
+        // ==================================================
+        // PRIORITY 1 → maicaAlerts (ONLY FinalAlertMessage)
+        // ==================================================
+        if (Array.isArray(this.maicaAlerts) && this.maicaAlerts.length > 0) {
+ 
+            this.maicaAlerts.forEach(alert => {
+ 
+                let message = alert?.FinalAlertMessage;
+ 
+                if (message && message.trim() !== '') {
+                    alertsArray.push(
+                        this.cleanText(message, clientName)
+                    );
+                }
+            });
+        }
+ 
+        // ==================================================
+        // PRIORITY 2 → ClientAlert (if maicaAlerts empty)
+        // ==================================================
+        else if (this.ClientAlert && this.ClientAlert.trim() !== '') {
+ 
+            let formatted = this.cleanText(this.ClientAlert, clientName);
+ 
+            // Break sentences to match maicaAlerts visual format
+            formatted = formatted.replace(/\. /g, '.\n');
+ 
+            alertsArray.push(formatted);
+        }
+ 
+        // Join uniformly
+        this.resolvedClientAlerts = alertsArray.join('\n\n');
+ 
+        // Send back to OmniScript JSON
+        this.omniApplyCallResp({
+            ResolvedClientAlerts: this.resolvedClientAlerts
+        });
+    }
+ 
+    cleanText(value, clientName) {
+    
+        if (!value) return '';
+    
+        let text = value;
+    
+        // Replace merge field safely
+        text = text.replace(/\{\!\s*Name\s*\}/gi, clientName || '');
+    
+        // Convert paragraph tags to line breaks BEFORE removing HTML
+        text = text.replace(/<\/p>/gi, '\n');
+        text = text.replace(/<br\s*\/?>/gi, '\n');
+    
+        // Remove all remaining HTML tags
+        text = text.replace(/<[^>]*>/g, '');
+    
+        // Decode common HTML entities
+        text = text.replace(/&nbsp;/gi, ' ');
+        text = text.replace(/&amp;/gi, '&');
+        text = text.replace(/&lt;/gi, '<');
+        text = text.replace(/&gt;/gi, '>');
+        text = text.replace(/&quot;/gi, '"');
+    
+        // Normalize multiple line breaks (but KEEP them)
+        text = text.replace(/\n\s*\n+/g, '\n\n');
+    
+        return text.trim();
+    }
+}
