@@ -62,12 +62,10 @@ public without sharing class MC_DocumentGenerationClass {
                 }
                 
                 // The query is inside the check and uses WITH USER_MODE to enforce FLS.
-                List<ContentVersion> contentVersions = [
-                SELECT Id, ContentDocumentId
-                FROM ContentVersion
-                WHERE ContentDocumentId = :contentDocId
-                WITH USER_MODE
-        ];
+                List<ContentVersion> contentVersions = [SELECT Id, ContentDocumentId
+                                                            FROM ContentVersion
+                                                            WHERE ContentDocumentId = :contentDocId
+                                                            WITH USER_MODE];
                 
                 if (!contentVersions.isEmpty()) {
                     contentVersionId = contentVersions[0].Id;
@@ -134,6 +132,7 @@ public without sharing class MC_DocumentGenerationClass {
                 if(unRelatedObjectName == 'Medical_Conditions__c') {
                     String allergyQuery = queryAllFields(unRelatedObjectName,(String)parentAccountObj.get('Id'), objRelFieldApiMap.get(unRelatedObjectName));
                     unRelatedSobjList = Database.Query(allergyQuery);
+                
                 }
                 else if(unRelatedObjectName == 'GDCP_Goal__c') {
                     String unrelatedObjectQuery = queryAllFields(unRelatedObjectName,(String)obj.get('Goal_Directed_Care_Plan_Form__c'), objRelFieldApiMap.get(unRelatedObjectName));
@@ -189,6 +188,8 @@ public without sharing class MC_DocumentGenerationClass {
             // For Unrelated Object
             if(isUnRelatedObjectApplicable){
                 List<Map<String, Object>> unRelatedObjectList = new List<Map<String, Object>>();
+                List<Map<String, Object>> allergyOnlyObjectList = new List<Map<String, Object>>();
+                List<Map<String, Object>> medConOnlyObjectList = new List<Map<String, Object>>();
                 for(Sobject unRelatedObj : unRelatedSobjList){
                     Map<String, Object> unRelatedSObjMap = new Map<String, Object>();
                     for(Document_Mappings__c docMapping : documentMappingsList){
@@ -204,10 +205,29 @@ public without sharing class MC_DocumentGenerationClass {
                             }
                         }
                     }
+                    // Determine Record Type Name for this row
+                    Id recordTypeId = (Id) unRelatedObj.get('RecordTypeId');
+                    //String recordTypeName = rtIdToName.get(recordTypeId);
+                    String rtDevName = null;
+                    if (recordTypeId != null) {
+                        rtDevName = unRelatedObj.getSObjectType().getDescribe().getRecordTypeInfosById().get(recordTypeId).getDeveloperName();
+                    	system.debug('===============rtDevName==========='+rtDevName);
+                    }
+					// Split by RT name (case-sensitive compare; adjust if needed)
+                    if (rtDevName == 'Allergy_Intolerance') {
+                        allergyOnlyObjectList.add(unRelatedSObjMap);
+                    } else if (rtDevName == 'Medical_Conditions') {
+                        medConOnlyObjectList.add(unRelatedSObjMap);
+                    }
+                    
                     unRelatedObjectList.add(unRelatedSObjMap);
                 }
                 if(unRelatedObjectName=='Medical_Conditions__c'){
                     tokenDataMap.put('allergyObjectList', unRelatedObjectList);
+                    tokenDataMap.put('allergyOnlyObjectList', allergyOnlyObjectList);
+                    tokenDataMap.put('medCondObjectList', medConOnlyObjectList);
+                    
+                    
                 }
                 else{
                     tokenDataMap.put('unRelatedObjectList', unRelatedObjectList);
@@ -264,6 +284,8 @@ public without sharing class MC_DocumentGenerationClass {
                                 tokenDataMap.put(docMapping.Document_Token__c, imageMap);
                             }else if(docMapping.Data_Type__c == 'Text_Transform'){
                                 tokenDataMap.put(docMapping.Document_Token__c, transformText(docMapping, obj));
+                            }else if(docMapping.Data_Type__c == 'Boolean_Transform'){
+                                tokenDataMap.put(docMapping.Document_Token__c, booleanTransform(docMapping, obj));
                             }else if(docMapping.Data_Type__c == 'Boolean'){
                                 tokenDataMap.put(docMapping.Document_Token__c, transformBoolean(docMapping, obj));
                             }else if(docMapping.Data_Type__c == 'Picklist'){
@@ -272,8 +294,12 @@ public without sharing class MC_DocumentGenerationClass {
                                 tokenDataMap.put(docMapping.Document_Token__c, formatDate((Date)obj.get(docMapping.Token_Value__c)));
                             }else if(docMapping.Data_Type__c == 'Time'){
                                 tokenDataMap.put(docMapping.Document_Token__c, formatTime((Time)obj.get(docMapping.Token_Value__c)));
-                            }else{
-                                tokenDataMap.put(docMapping.Document_Token__c, obj.get(docMapping.Token_Value__c));
+                            }/*else if(docMapping.Data_Type__c == 'HTML_Transform'){
+                                system.debug('===================HTML_Transform======================'+formatText((String)obj.get(docMapping.Token_Value__c)));
+                                 tokenDataMap.put(docMapping.Document_Token__c, formatText((String)obj.get(docMapping.Token_Value__c)));
+                            
+                            }*/else{
+                                tokenDataMap.put(docMapping.Document_Token__c,obj.get(docMapping.Token_Value__c));
                             }
                         }
                     }else{
@@ -281,13 +307,16 @@ public without sharing class MC_DocumentGenerationClass {
                         if(docMapping.Data_Type__c == 'Date'){
                             tokenDataMap.put(docMapping.Document_Token__c, formatDate((Date)parentAccountObj.get(docMapping.Token_Value__c)));
                         }else{
+                            system.debug('ParentObjectMap '+parentAccountObj);
                             tokenDataMap.put(docMapping.Document_Token__c, parentAccountObj.get(docMapping.Token_Value__c));
+                            System.debug('TOken Data Account1111111111111111'+tokenDataMap);
                         }
                     }
                 }
             }
             
             String tokenData = JSON.serialize(tokenDataMap);
+            system.debug('===============tokenDataMap================='+JSON.serialize(tokenDataMap));
             DocumentGenerationProcess docGenRequest = new DocumentGenerationProcess();
             docGenRequest.Type = 'GenerateAndConvert'; // Generates Word and PDF
             docGenRequest.RequestText = requestData;
@@ -309,6 +338,26 @@ public without sharing class MC_DocumentGenerationClass {
                 }
             }
         }
+    }
+    
+    public static string formatText(String textValue){
+        
+        if (String.isBlank(textValue)) {
+            return textValue;
+        }
+
+        // Fast check: only proceed if any newline exists
+        if (!(textValue.contains('\n') || textValue.contains('\r'))) {
+            return textValue; // nothing to do
+        }
+
+        // Replace Windows CRLF first (avoids producing <br/><br/>)
+        String converted = textValue.replaceAll('\\r\\n|\\r', '\n');
+        // Replace any remaining CR or LF
+       // converted = converted.replaceAll('\\r\\n|\\r', '\n');
+
+        return converted;
+
     }
     
     public static string queryAllFields(String objectName, Id sobjectId, String childObjRelFieldName) {
@@ -341,12 +390,20 @@ public without sharing class MC_DocumentGenerationClass {
             fieldNames.add('Related_Account__r.LastName');
             fieldNames.add('Related_Account__r.FirstName');
             fieldNames.add('Related_Account__r.Address__c');
+            fieldNames.add('Related_Account__r.Access_to_property__c');
+            fieldNames.add('Related_Account__r.Living_Arrangements__pc');
+            fieldNames.add('Related_Account__r.Interpreter_required__pc');
+            fieldNames.add('Related_Account__r.Does_the_participant_live_alone__c');
+            fieldNames.add('Related_Account__r.receive_assistance_with_daily_activity__c');
+           
             //fieldNames.add('Account_Name__r.mecwacare_Client_ID__c');
             soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName + ' WHERE Id = :sobjectId ';
         }else{
             String andCondition = '';
             if(objectName == 'Medical_Conditions__c'){
-                andCondition = ' AND RecordType.DeveloperName = \'Allergy_Intolerance\'';
+                andCondition = ' AND (RecordType.DeveloperName = \'Allergy_Intolerance\' ' +
+    						   ' OR RecordType.DeveloperName = \'Medical_Conditions\')';
+
             }
             soql = 'SELECT ' + String.join(fieldNames, ',') + ' FROM ' + objectName +  ' WHERE ' + childObjRelFieldName + ' = \'' + sobjectId + '\'' + andCondition;
         }
@@ -381,6 +438,22 @@ public without sharing class MC_DocumentGenerationClass {
         String formattedDate = inputDateTime.format('dd/MM/yyyy hh:mm a');
         return formattedDate;
     }
+    //Boolean Transform
+    public static boolean booleanTransform(Document_Mappings__c docMapping, Sobject obj){
+        Boolean outputString;
+        //obj.put('Hazard_Reduced__c', 'No');
+        //String documentTokenString = docMapping.Document_Token__c.split('\\$')[1]; //Withoutunderscore FieldAPIName_Yes, FieldAPIName_No
+        //if(docMapping.Document_Token__c.endsWith('YES')){
+            if(obj.get(docMapping.Token_Value__c) != null){
+                if(obj.get(docMapping.Token_Value__c) == 'Yes'){
+                    outputString = true;
+                }else{
+                    outputString = false;
+                }
+            }
+            system.debug('============Document_Token__c====='+docMapping.Document_Token__c+'====Output==='+outputString);
+            return outputString;
+        }
     //Transform Text
     public static string transformText(Document_Mappings__c docMapping, Sobject obj){
         String outputString = '';
