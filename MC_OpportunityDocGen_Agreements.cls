@@ -190,7 +190,38 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                   AND Additional_responsibility__c INCLUDES ('Carer')
             ];
         }
-
+        
+        /* ================= ContactContactRelation (NDIS Participant Nominee ONLY) ================= */
+        ContactContactRelation ccrNDISNominee = null;
+        if (acc != null && acc.PersonContactId != null) {
+            List<ContactContactRelation> nomineeRows = [
+                SELECT Id,
+                       ContactId,
+                       RelatedContactId,
+                       Client_Nominated_Representative__c,
+                       Power_of_Attorney__c,
+                       RelatedContact.Name,
+                       RelatedContact.Phone,
+                       RelatedContact.MobilePhone,
+                       RelatedContact.Email,
+                       RelatedContact.MailingStreet,
+                       RelatedContact.MailingCity,
+                       RelatedContact.MailingState,
+                       RelatedContact.MailingPostalCode,
+                       RelatedContact.MailingCountry,
+                       RelatedContact.maica_cc__NDIS_Number__c
+                FROM ContactContactRelation
+                WHERE ContactId = :acc.PersonContactId
+                  AND Client_Nominated_Representative__c = 'Full'
+                ORDER BY CreatedDate ASC
+                LIMIT 1
+            ];
+         
+            if (!nomineeRows.isEmpty()) {
+                ccrNDISNominee = nomineeRows[0];
+            }
+        }
+ 
         /* -------- Flags from Funding Items -------- */
         Boolean showPartG_AT_HM = false;
         Boolean showPartH_Restorative = false;
@@ -466,6 +497,30 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         }
         token.put('CarerCCRList', carerOut);                 // repeating block data
         token.put('showCarerCCRs', !carerOut.isEmpty());     // optional boolean to toggle section
+        
+        /* ================= Tokens: NDIS Participant Nominee (Single Record) ================= */
+        Boolean showNDISNominee = (ccrNDISNominee != null);
+        token.put('showNDISNominee', showNDISNominee);
+        if (ccrNDISNominee != null) {
+         	token.put('NomineeName',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.Name : '');
+            token.put('NomineePhone',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.Phone : '');
+            token.put('NomineeMobile',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.MobilePhone : '');
+            token.put('NomineeEmail',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.Email : '');
+            token.put('NomineeAddress',ccrNDISNominee.RelatedContact != null? formatAddress(
+                        ccrNDISNominee.RelatedContact.MailingStreet,
+                        ccrNDISNominee.RelatedContact.MailingCity,
+                        ccrNDISNominee.RelatedContact.MailingState,
+                        ccrNDISNominee.RelatedContact.MailingPostalCode,
+                        ccrNDISNominee.RelatedContact.MailingCountry): '');
+            String poa = ccrNDISNominee.Power_of_Attorney__c != null
+                         ? ccrNDISNominee.Power_of_Attorney__c
+                         : '';
+            token.put('EnduringPOA_YES', poa.contains('Enduring') ? 'Yes' : '');
+            token.put('MedicalDM_YES',  poa.contains('Medical')  ? 'Yes' : '');
+            // Authority is YES if CCR exists, else NO
+            token.put('Authority_YES_NO',ccrNDISNominee != null ? 'Yes' : 'No');
+        }
+ 
 
         // Funding Items list
         List<Map<String,Object>> fiOut = new List<Map<String,Object>>();
