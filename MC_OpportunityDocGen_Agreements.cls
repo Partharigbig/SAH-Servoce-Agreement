@@ -123,16 +123,22 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         
         /*---------OpportunityProduct--------*/
         List<OpportunityLineItem> oliList = [
-                SELECT Id,
-                       Quantity,
-                       UnitPrice,
-                       TotalPrice,
-                       Service_Frequency__c,
-                       Product2.Name,
-                       Product2.Support_Item__r.Name
-                FROM OpportunityLineItem
-                WHERE OpportunityId = :opp.Id
-            ];
+            SELECT Id,
+                   Quantity,
+                   UnitPrice,
+                   TotalPrice,
+                   Service_Frequency__c,
+                   Service_Duration__c,
+                   Service_Day__c,
+                   Support_Item_Number__c,
+            	   Schedule_Day__c,
+                   Product2.Name,
+                   Product2.Support_Item__r.Name,
+            	   Opportunity.Next_review_date__c,
+            	   Opportunity.Funding_Type__c
+            FROM OpportunityLineItem
+            WHERE OpportunityId = :opp.Id
+        ];
 
         /* -------- Funding parent -------- */
         maica_cc__Funding__c funding = null;
@@ -438,7 +444,76 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             pcount++;
         }
          
-        token.put('ProductUnits', productOut);		
+        token.put('ProductUnits', productOut);
+        
+        /* ================= NDIS Service Agreement – Line Items Table ================= */
+ 
+        List<Map<String, Object>> ndisTableRows = new List<Map<String, Object>>();
+        Integer rowNum = 1;
+         
+        // 🔹 NEW: Grand Total accumulator
+        Decimal grandTotal = 0;
+         
+        for (OpportunityLineItem oli : oliList) {
+         
+            Map<String, Object> row = new Map<String, Object>();
+         
+            String supportNumber = (String)oli.get('Support_Item_Number__c');
+            String supportName =
+                (oli.Product2 != null && oli.Product2.Support_Item__r != null)
+                ? oli.Product2.Support_Item__r.Name
+                : (oli.Product2 != null ? oli.Product2.Name : '');
+         
+            row.put('SupportLineItem',
+                (supportNumber != null ? supportNumber : '') +
+                (supportNumber != null ? ' ; ' : '') +
+                supportName
+            );
+         
+            Decimal duration = oli.Service_Duration__c != null ? oli.Service_Duration__c : 0;
+            Decimal qty      = oli.Quantity != null ? oli.Quantity : 0;
+            Decimal totalSupportHours = duration * qty;
+         
+            row.put('ReviewDate',
+                oli.Opportunity != null
+                ? formatDate(oli.Opportunity.Next_review_date__c)
+                : ''
+            );
+            String supportDays = '';
+            
+            if (oli.Service_Frequency__c == 'Weekly' && !String.isBlank(oli.Schedule_Day__c)) {
+                // Multi-select values are separated by ;
+                supportDays = oli.Schedule_Day__c.replace(';', ', ');  
+            } else {
+                supportDays = oli.Service_Day__c;
+            }
+            row.put('SupportDays', supportDays);
+            row.put('ServiceDuration', duration);
+            row.put('Quantity', qty);
+            row.put('ServiceFrequency', oli.Service_Frequency__c);
+            row.put('TotalSupportHours', totalSupportHours);
+         
+            row.put('SupportItemRate', formatCurrency(oli.UnitPrice));
+         
+            Decimal totalValue = totalSupportHours * (oli.UnitPrice != null ? oli.UnitPrice : 0);
+         
+            row.put('TotalValue', formatCurrency(totalValue));
+         
+            // 🔹 ADD to grand total
+            grandTotal += totalValue;
+            row.put('FundingType',oli.Opportunity != null ? oli.Opportunity.Funding_Type__c : null);
+         
+            row.put('RowNumber', rowNum++);
+            ndisTableRows.add(row);
+        }
+         
+        // Put repeating rows
+        token.put('NDIS_LineItems', ndisTableRows);
+        token.put('showNDISLineItems', !ndisTableRows.isEmpty());
+         
+        // 🔹 NEW TOKEN: Grand Total
+        token.put('NDIS_TotalAmount', formatCurrency(grandTotal));
+ 
         
         // Funding (parent)
         if (funding != null) {
@@ -506,6 +581,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('NomineePhone',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.Phone : '');
             token.put('NomineeMobile',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.MobilePhone : '');
             token.put('NomineeEmail',ccrNDISNominee.RelatedContact != null ? ccrNDISNominee.RelatedContact.Email : '');
+            token.put('NomineeNDISNumber',ccrNDISNominee.RelatedContact != null? ccrNDISNominee.RelatedContact.maica_cc__NDIS_Number__c: '');
             token.put('NomineeAddress',ccrNDISNominee.RelatedContact != null? formatAddress(
                         ccrNDISNominee.RelatedContact.MailingStreet,
                         ccrNDISNominee.RelatedContact.MailingCity,
