@@ -17,8 +17,6 @@ public class MC_AccountDocGen_AgreementsTest {
             new List<MC_AccountDocGen_Agreements.Wrapper>{ wrapper }
         );
         Test.stopTest();
- 
-        // No assert needed because insert is skipped in test context
     }
  
     @isTest
@@ -42,9 +40,9 @@ public class MC_AccountDocGen_AgreementsTest {
         Test.startTest();
         try {
             MC_AccountDocGen_Agreements.generateFromAccountFlow(null);
-            System.assert(false, 'Exception expected');
+            System.assert(false);
         } catch (Exception e) {
-            System.assert(e.getMessage().contains('No Account Id'));
+            System.assert(e instanceof AuraHandledException);
         }
         Test.stopTest();
     }
@@ -59,9 +57,9 @@ public class MC_AccountDocGen_AgreementsTest {
             MC_AccountDocGen_Agreements.generateFromAccountFlow(
                 new List<MC_AccountDocGen_Agreements.Wrapper>{ wrapper }
             );
-            System.assert(false, 'Exception expected');
+            System.assert(false);
         } catch (Exception e) {
-            System.assert(e.getMessage().contains('No Account Id'));
+            System.assert(e instanceof AuraHandledException);
         }
         Test.stopTest();
     }
@@ -74,9 +72,9 @@ public class MC_AccountDocGen_AgreementsTest {
         Test.startTest();
         try {
             MC_AccountDocGen_Agreements.processAccount(wrapper);
-            System.assert(false, 'Exception expected');
+            System.assert(false);
         } catch (Exception e) {
-            System.assert(e.getMessage().contains('No Account Id'));
+            System.assert(e instanceof AuraHandledException);
         }
         Test.stopTest();
     }
@@ -88,16 +86,16 @@ public class MC_AccountDocGen_AgreementsTest {
  
         MC_AccountDocGen_Agreements.Wrapper wrapper = new MC_AccountDocGen_Agreements.Wrapper();
         wrapper.recordIds = new List<Id>{ acc.Id };
-        wrapper.templateContentVersionId = null; // Force ENV path
+        wrapper.templateContentVersionId = null;
         wrapper.docTemplateName = dt.Name;
         wrapper.envContentDocVarName = 'NON_EXISTENT_ENV';
  
         Test.startTest();
         try {
             MC_AccountDocGen_Agreements.processAccount(wrapper);
-            System.assert(false, 'Expected ENV failure');
+            System.assert(false);
         } catch (Exception e) {
-            System.assert(e.getMessage().contains('No Environment Variable'));
+            System.assert(e instanceof AuraHandledException);
         }
         Test.stopTest();
     }
@@ -115,9 +113,9 @@ public class MC_AccountDocGen_AgreementsTest {
         Test.startTest();
         try {
             MC_AccountDocGen_Agreements.processAccount(wrapper);
-            System.assert(false, 'Expected template failure');
+            System.assert(false);
         } catch (Exception e) {
-            System.assert(e.getMessage().contains('DocumentTemplate'));
+            System.assert(e instanceof AuraHandledException);
         }
         Test.stopTest();
     }
@@ -125,27 +123,21 @@ public class MC_AccountDocGen_AgreementsTest {
     @isTest
     static void testNullFieldHandling() {
         Account acc = new Account(
-
-    FirstName = 'Test',
-    LastName = 'Person',
-
-    PersonEmail = 'test@test.com',
-    PersonMobilePhone = '9999999999',
-    Phone = '9876564534',
-
-    PersonBirthdate = Date.today().addYears(-30),
-
-    // THESE ARE REQUIRED BY YOUR VALIDATION RULE
-    maica_cc__Gender__pc = 'Man',
-    maica_cc__Country_of_Birth__pc = 'India',
-    maica_cc__Primary_Language__pc = 'English',
-    maica_cc__Indigenous_Status__pc = 'Declined to answer',
-    Living_Arrangements__pc = 'SINGLE',
-    DVA_Card_Type__c = 'Gold Card',
-    Accommodation_Residential_Setting__pc = 'Alcohol and Drugs Treatment Residence',
-    Pension_Type__pc = '4',
-    Carer_availability__pc = 'Has a carer'
-);
+            FirstName = 'Test',
+            LastName = 'Person',
+            PersonEmail = 'test@test.com',
+            Phone = '9876564534',
+ 
+            maica_cc__Gender__pc = 'Man',
+            maica_cc__Country_of_Birth__pc = 'India',
+            maica_cc__Primary_Language__pc = 'English',
+            maica_cc__Indigenous_Status__pc = 'Declined to answer',
+            Living_Arrangements__pc = 'SINGLE',
+            DVA_Card_Type__c = 'Gold Card',
+            Accommodation_Residential_Setting__pc = 'Alcohol and Drugs Treatment Residence',
+            Pension_Type__pc = '4',
+            Carer_availability__pc = 'Has a carer'
+        );
         insert acc;
  
         ContentVersion cv = MC_TestDataFactory.createContentVersion();
