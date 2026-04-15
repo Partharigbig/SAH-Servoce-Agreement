@@ -1,0 +1,86 @@
+How the Interview Started
+How the Interview Started
+S Parthasarathy (005Bm00000GCKwD) started the flow interview.
+API Version for Running the Flow: 65
+Some of this flow's variables were set when the interview started.
+recordId = 006Bm00000Rzl9pIAB
+versionId:301Bm00000yREPJ
+Flow start time: <b>15 April 2026 at 3:55 pm</b>.
+
+
+Get Records: GetOpportunity
+One or more  Opportunity  records were retrieved.
+Find all Opportunity records where:
+Id Equals {!recordId} (006Bm00000Rzl9pIAB)
+Store the values of these fields in GetOpportunity: Funding_Source__c, AccountId, Id, Name
+Result
+Successfully found records.
+
+
+Decision: Is Funding Source NDIS
+The  default  outcome was executed.
+$$:OutcomeNotExecuted:Yes
+Skipped this outcome because its conditions weren't met: Yes
+Outcome conditions: 
+1. {!GetOpportunity.Funding_Source__c} (Support at Home) Equals NDIS
+2. {!GetOpportunity.Account.maica_cc__NDIS_Number__pc} (656764454) Is null true
+Logic: All conditions must be true (AND)
+$$:DefaultOutcomeExecuted:
+Default outcome executed.
+
+
+Transaction Committed
+Any records that the flow was ready to create, update, or delete were committed to the database.
+
+
+Screen: ConfirmGenerate
+Selected Navigation Button: NEXT
+Display Text: DisplayConfirm
+Value at run time: 
+Generate the Service Agreement for Conor McGregor?
+
+
+
+Assignment: BuildRecordIds
+1 variable was updated.
+{!vRecordIds} Add {!recordId}
+Result
+{!vRecordIds} = "[006Bm00000Rzl9pIAB]"
+
+
+MC_OpportunityDocGen_Agreements (Apex): CallSAHDocGenApex
+We couldn't run action  MC_OpportunityDocGen_Agreements  because something went wrong.
+Inputs:
+recordIds = {!vRecordIds}
+[
+  "006Bm00000Rzl9pIAB"
+]
+$$:Fault:
+Error Occurred: An Apex error occurred: System.AuraHandledException: Script-thrown exception
+
+
+
+Error Handled
+The “CallSAHDocGenApex” element encountered an error. Because this element has a fault connector, the interview executes the elements in the fault path.
+
+
+Assignment: SahValidation
+1 variable was updated.
+{!varErrorMessage} Equals {!$Flow.FaultMessage}
+Result
+{!varErrorMessage} = "An Apex error occurred: System.AuraHandledException: Script-thrown exception
+"
+
+
+Decision: ValidationScreenDec
+" SAHAgreementScreen " outcome was executed.
+$$:OutcomeExecuted:SAHAgreementScreen
+Outcome executed: SAHAgreementScreen
+Outcome conditions: 
+{!varErrorMessage} (An Apex error occurred: System.AuraHandledException: Script-thrown exception
+) Is null false
+All conditions must be true (AND)
+
+
+Transaction Committed
+Any records that the flow was ready to create, update, or delete were committed to the database.
