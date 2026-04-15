@@ -1,20 +1,11 @@
 public without sharing class MC_OpportunityDocGen_Agreements {
-
-    /* ================= Public Flow API ================= */
-
     public class Wrapper {
         @InvocableVariable(required=true)
-        public List<Id> recordIds;                 // Opportunity Id(s) – first used
-
-        // Optional direct overrides (kept for flexibility; you can ignore in Flow)
-        @InvocableVariable public String docTemplateName;             // DocumentTemplate.Name
-        @InvocableVariable public String templateContentVersionId;    // ContentVersion.Id
-
-        // Optional: dynamic by ENV variable *names* (DeveloperName of Environment_Variables__mdt)
-        // If you leave these blank, the class will auto-pick by Funding Source:
-        //  SAH_Agreement_ContentId / NDIS_Agreement_ContentId / Service_Agreement_ContentId
-        @InvocableVariable public String envContentDocVarName;        // Value__c = ContentDocumentId
-        @InvocableVariable public String envTemplateNameVarName;      // Value__c = DocumentTemplate.Name
+        public List<Id> recordIds;                 
+        @InvocableVariable public String docTemplateName;             
+        @InvocableVariable public String templateContentVersionId;   
+        @InvocableVariable public String envContentDocVarName;        
+        @InvocableVariable public String envTemplateNameVarName;      
     }
 
     @InvocableMethod(label='Generate Agreement (auto by Funding Source)')
@@ -26,23 +17,21 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         process(inputs[0]);
     }
 
-    /* ================= Implementation ================= */
-
-    // Generic template to reuse for all agreements (mapping-only template; must be Active)
     private static final String DEFAULT_TEMPLATE_NAME = 'GeneralServiceAgreementTemplate';
-
-    // ENV DeveloperNames we’ll use when Flow doesn’t override
     private static final String ENV_SAH   = 'SAH_Agreement_ContentId';
     private static final String ENV_NDIS  = 'NDIS_Agreement_ContentId';
     private static final String ENV_GEN   = 'Service_Agreement_ContentId';
+    private static final String ENV_CHSP   = 'CHSP_Agreement_ContentId';
 
-    // Which Funding Source goes to which ENV DeveloperName
-    private static String pickEnvKeyByFunding(String fundingSource) {
+    private static String pickEnvKeyByFunding(String fundingSource, String fundingType) {
         if (String.isBlank(fundingSource)) return ENV_GEN;
         String fs = fundingSource.trim();
+        String ft = fundingType != null ? fundingType.trim() : '';
+        if(fs == 'Block Funding' && ft == 'CHSP') {
+            return ENV_CHSP;
+        }
         if (fs == 'Support at Home') return ENV_SAH;
         if (fs == 'NDIS')            return ENV_NDIS;
-        // Block Funding, DVA, Self Funding, Partner organisation, etc.
         return ENV_GEN;
     }
 
@@ -53,8 +42,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         Opportunity opp = null;
         List<Opportunity> oppRows = [
             SELECT Id, Name, StageName, CloseDate, Amount,
-                   AccountId, Funding__c, Funding_Source__c, Funding_Administrator__c, Agreement_Start_Date__c,
-            Agreement_End_Date__c, Opportunity_Owner__c, OwnerId, Transfer_from_another_provider__c, Previous_Service_Exit_Date__c
+                   AccountId, Funding__c, Funding_Source__c,Funding_Type__c, Funding_Administrator__c, Agreement_Start_Date__c,
+            Agreement_End_Date__c, Opportunity_Owner__c, OwnerId, Transfer_from_another_provider__c, Previous_Service_Exit_Date__c,Next_review_date2__c
             FROM Opportunity
             WHERE Id = :oppId
             LIMIT 1
@@ -85,7 +74,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                        Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
                        Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, maica_cc__NDIS_Number__pc, 
                 	   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry, Payment_Method__c	
+                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry, PersonMailingCity, 
+                	   PersonMailingCountry, PersonMailingStreet, PersonMailingPostalCode, PersonMailingState,Payment_Method__c	
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
@@ -99,7 +89,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                 fundingAdmin = [
                     SELECT Id, Name, Phone, PersonEmail,
                            BillingStreet, BillingCity, BillingState,
-                           BillingPostalCode, BillingCountry
+                           BillingPostalCode, BillingCountry,PersonMailingCity, 
+                	   	   PersonMailingCountry, PersonMailingStreet, PersonMailingPostalCode, PersonMailingState
                     FROM Account
                     WHERE Id = :opp.Funding_Administrator__c
                     LIMIT 1
@@ -132,9 +123,12 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                    Service_Day__c,
                    Support_Item_Number__c,
             	   Schedule_Day__c,
+            	   Schedule_Count__c,
+            	   Start_Date__c,
+            	   End_Date__c,
                    Product2.Name,
                    Product2.Support_Item__r.Name,
-            	   Opportunity.Next_review_date__c,
+            	   Opportunity.Next_review_date2__c,
             	   Opportunity.Funding_Type__c
             FROM OpportunityLineItem
             WHERE OpportunityId = :opp.Id
@@ -345,6 +339,15 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             token.put('AccountNDISNumber', acc.maica_cc__NDIS_Number__pc);
             token.put('AccountDescription', acc.Description);
             token.put('AccountPaymentMeth',acc.Payment_Method__c);
+            token.put('AccountMailingAddress',
+                formatAddress(
+                    acc.PersonMailingStreet,
+                    acc.PersonMailingCity,
+                    acc.PersonMailingState,
+                    acc.PersonMailingPostalCode,
+                    acc.PersonMailingCountry
+                )
+            );
             token.put('AccountHomeAddress',
                 formatAddress(
                     acc.Home_Address__Street__s,
@@ -379,8 +382,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                     token.put('FundingAdminName', fundingAdmin.Name);
                     token.put('FundingAdminEmail', fundingAdmin.PersonEmail);
                     token.put('FundingAdminPhone', fundingAdmin.Phone);
-                 
-                    // Combine address neatly into one string
                     String addr = '';
                     List<String> addrParts = new List<String>{
                         fundingAdmin.BillingStreet,
@@ -401,7 +402,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                     token.put('FundingAdminPhone', '');
                     token.put('FundingAdminBillingAddress', '');
                 }
-        // Tokens sourced from Service Agreement (fallback to Opportunity)
             token.put('ServiceStartDate',
                       sa != null ? formatDate(sa.maica_cc__Start_Date__c)
                                  : formatDate(opp.Agreement_Start_Date__c));
@@ -426,7 +426,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         Integer pcount = 1;
          
         for (OpportunityLineItem oli : oliList) {
-            // Build one row for each product line
             Map<String, Object> row = new Map<String, Object>();
          
             row.put('RowNumber', pcount);
@@ -446,75 +445,104 @@ public without sharing class MC_OpportunityDocGen_Agreements {
          
         token.put('ProductUnits', productOut);
         
-        /* ================= NDIS Service Agreement – Line Items Table ================= */
+// ------------------ NDIS Line Items ------------------
  
-        List<Map<String, Object>> ndisTableRows = new List<Map<String, Object>>();
-        Integer rowNum = 1;
+    List<Map<String, Object>> ndisTableRows = new List<Map<String, Object>>();
+    Decimal grandTotal = 0;
+    Integer rowNum = 1;
+     
+    for (OpportunityLineItem oli : oliList) {
+     
+        Map<String, Object> row = new Map<String, Object>();
+        Decimal totalSupportHours = oli.Quantity != null ? oli.Quantity : 0;
+        Decimal rate = oli.UnitPrice != null ? oli.UnitPrice : 0;
+        Decimal totalValue = oli.TotalPrice != null
+            ? oli.TotalPrice
+            : totalSupportHours * rate;
+     
+        Decimal serviceDuration = oli.Service_Duration__c != null
+            ? oli.Service_Duration__c
+            : 1;
+        Decimal numberOfDays = 0;
+     
+        if (serviceDuration > 0) {
+            numberOfDays = totalSupportHours / serviceDuration;
+        }
+        String formattedDays;
+     
+        if (!String.isBlank(oli.Schedule_Day__c)) {
+            formattedDays = oli.Schedule_Day__c.replace(';', ', ');
+        }
+        else if (!String.isBlank(oli.Service_Day__c)) {
+            formattedDays = oli.Service_Day__c;
+        }
+        else {
+            formattedDays = 'Anytime';
+        }
+        String hourLabel = serviceDuration == 1 ? 'Support hour' : 'Support hours';
+     
+        String supportCalc;
+     
+        if (numberOfDays > 1) {
+            supportCalc =
+                serviceDuration.setScale(2) + ' ' + hourLabel +
+                ' x (' + formattedDays + ') x ' +
+                numberOfDays.setScale(0) + ' total days = ' +
+                totalSupportHours.setScale(2) + ' support hours';
+        } else {
+            supportCalc =
+                totalSupportHours.setScale(2) + ' support hours';
+        }
+     
+        String totalValueText =
+            totalSupportHours.setScale(2) + ' support hours x $' +
+            rate.setScale(2) + ' = $' +
+            totalValue.setScale(2);
+        
+       String supportNumber = oli.Support_Item_Number__c != null
+        ? oli.Support_Item_Number__c
+        : '';
          
-        // 🔹 NEW: Grand Total accumulator
-        Decimal grandTotal = 0;
+        String supportName = oli.Product2 != null
+            ? oli.Product2.Name
+            : '';
          
-        for (OpportunityLineItem oli : oliList) {
+        String supportLineItem = '';
          
-            Map<String, Object> row = new Map<String, Object>();
-         
-            String supportNumber = (String)oli.get('Support_Item_Number__c');
-            String supportName =
-                (oli.Product2 != null && oli.Product2.Support_Item__r != null)
-                ? oli.Product2.Support_Item__r.Name
-                : (oli.Product2 != null ? oli.Product2.Name : '');
-         
-            row.put('SupportLineItem',
-                (supportNumber != null ? supportNumber : '') +
-                (supportNumber != null ? ' ; ' : '') +
-                supportName
-            );
-         
-            Decimal duration = oli.Service_Duration__c != null ? oli.Service_Duration__c : 0;
-            Decimal qty      = oli.Quantity != null ? oli.Quantity : 0;
-            Decimal totalSupportHours = duration * qty;
-         
-            row.put('ReviewDate',
-                oli.Opportunity != null
-                ? formatDate(oli.Opportunity.Next_review_date__c)
-                : ''
-            );
-            String supportDays = '';
-            
-            if (oli.Service_Frequency__c == 'Weekly' && !String.isBlank(oli.Schedule_Day__c)) {
-                // Multi-select values are separated by ;
-                supportDays = oli.Schedule_Day__c.replace(';', ', ');  
-            } else {
-                supportDays = oli.Service_Day__c;
-            }
-            row.put('SupportDays', supportDays);
-            row.put('ServiceDuration', duration);
-            row.put('Quantity', qty);
-            row.put('ServiceFrequency', oli.Service_Frequency__c);
-            row.put('TotalSupportHours', totalSupportHours);
-         
-            row.put('SupportItemRate', formatCurrency(oli.UnitPrice));
-         
-            Decimal totalValue = totalSupportHours * (oli.UnitPrice != null ? oli.UnitPrice : 0);
-         
-            row.put('TotalValue', formatCurrency(totalValue));
-         
-            // 🔹 ADD to grand total
-            grandTotal += totalValue;
-            row.put('FundingType',oli.Opportunity != null ? oli.Opportunity.Funding_Type__c : null);
-         
-            row.put('RowNumber', rowNum++);
-            ndisTableRows.add(row);
+        if (!String.isBlank(supportNumber) && !String.isBlank(supportName)) {
+            supportLineItem = supportNumber + ' ; ' + supportName;
+        } else if (!String.isBlank(supportNumber)) {
+            supportLineItem = supportNumber;
+        } else {
+            supportLineItem = supportName;
         }
          
-        // Put repeating rows
-        token.put('NDIS_LineItems', ndisTableRows);
-        token.put('showNDISLineItems', !ndisTableRows.isEmpty());
-         
-        // 🔹 NEW TOKEN: Grand Total
-        token.put('NDIS_TotalAmount', formatCurrency(grandTotal));
- 
+        row.put('SupportLineItem', supportLineItem);
+    
+        row.put('SupportColumnText', supportCalc);
+        row.put('SupportDays', formattedDays);
+        row.put('TotalValueColumnText', totalValueText);
+        row.put('SupportLineItem', supportLineItem);
+        row.put('SupportItemRate', rate.setScale(2));
+        row.put('TotalSupportHours', totalSupportHours.setScale(2));
+        row.put('RowNumber', rowNum++);
+     
+        grandTotal += totalValue;
+     
+        ndisTableRows.add(row);
+            
+        }
         
+        token.put('NDIS_LineItems', ndisTableRows);
+        token.put('NDIS_TotalAmount', formatCurrency(grandTotal));
+        token.put('showNDISLineItems', !ndisTableRows.isEmpty());
+                
+                if (opp.Next_review_date2__c != null) {
+            token.put('NextReviewDate', formatDate(opp.Next_review_date2__c));
+        } else {
+            token.put('NextReviewDate', '');
+        }
+     
         // Funding (parent)
         if (funding != null) {
             token.put('FundingName', funding.Name);
@@ -570,8 +598,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                     );
             carerOut.add(row);
         }
-        token.put('CarerCCRList', carerOut);                 // repeating block data
-        token.put('showCarerCCRs', !carerOut.isEmpty());     // optional boolean to toggle section
+        token.put('CarerCCRList', carerOut);                 
+        token.put('showCarerCCRs', !carerOut.isEmpty());    
         
         /* ================= Tokens: NDIS Participant Nominee (Single Record) ================= */
         Boolean showNDISNominee = (ccrNDISNominee != null);
@@ -800,16 +828,11 @@ public without sharing class MC_OpportunityDocGen_Agreements {
              
             //Add to main token map
             token.put('ApprovedServiceList', approvedServiceListStr);
-                    
-        /* -------- Resolve which DOCX to use (ContentVersionId) via ENV -------- */
 
-        // Allow direct override from Flow (rare)
         String contentVersionId = w.templateContentVersionId;
-
-        // If Flow passed a specific ENV key, use it; else auto-pick by Funding Source
         String envKey = !String.isBlank(w.envContentDocVarName)
                         ? w.envContentDocVarName
-                        : pickEnvKeyByFunding(opp.Funding_Source__c);
+                        : pickEnvKeyByFunding(opp.Funding_Source__c, opp.Funding_Type__c);
 
         // Fetch ENV values
         Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envKey });
@@ -820,8 +843,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                 throw new AuraHandledException('No Environment Variable found for ' + envKey + ' (Value__c should be a ContentDocumentId).');
             }
             Id contentDocumentId = (Id) contentDocumentIdStr;
-
-            // Resolve latest ContentVersionId for the ContentDocumentId
             List<ContentVersion> cv = [
                 SELECT Id
                 FROM ContentVersion
@@ -834,8 +855,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             }
             contentVersionId = cv[0].Id;
         }
-
-        /* -------- Resolve the generic DocumentTemplate (mapping-only) -------- */
 
         String templateName = !String.isBlank(w.docTemplateName)
                               ? w.docTemplateName
@@ -882,7 +901,6 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     }
 
     /* ================= Helpers ================= */
-    // Roll-up of min start, max end, and total approved for a set of Funding Items
     private class PartRollup {
         public Date    minStart;
         public Date    maxEnd;
