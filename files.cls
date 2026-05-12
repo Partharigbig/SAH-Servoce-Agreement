@@ -59,7 +59,7 @@ public with sharing  class MC_GetFilesList {
             contentDocIds.add(link.ContentDocumentId);
         }
         
-        String query = 'SELECT Id, Title, CreatedDate, ' +
+        String query = 'SELECT Id, Title, CreatedDate, FileType, ' +
             '(SELECT Id, File_Category__c FROM ContentVersions WHERE IsLatest = TRUE LIMIT 1) ' +
             'FROM ContentDocument WHERE Id IN: contentDocIds ';
         
@@ -72,8 +72,22 @@ public with sharing  class MC_GetFilesList {
         query += 'LIMIT :pageSize OFFSET :offset';
         
         List<ContentDocument> files = Database.query(String.escapeSingleQuotes(query));
-        
-        Integer totalRecords = [SELECT COUNT() FROM ContentDocument WHERE Id IN :contentDocIds WITH SECURITY_ENFORCED];
+            
+            System.debug('Total files before filter: ' + files.size());
+            for(ContentDocument f : files) {
+                System.debug('File: ' + f.Title + ' | FileType: ' + f.FileType);
+            }            
+            
+            List<ContentDocument> filteredFiles = new List<ContentDocument>();
+            for(ContentDocument f : files) {
+                if(f.FileType != 'SNOTE') {
+                    filteredFiles.add(f);
+                }
+            }
+            
+            System.debug('Total files after filter: ' + filteredFiles.size());
+                    
+        Integer totalRecords = [SELECT COUNT() FROM ContentDocument WHERE Id IN :contentDocIds AND FileType != 'SNOTE' WITH SECURITY_ENFORCED];
         
         response.put('files', files);
         response.put('totalRecords', totalRecords); 
