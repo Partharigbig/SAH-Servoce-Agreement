@@ -5,7 +5,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         @InvocableVariable public String docTemplateName;             
         @InvocableVariable public String templateContentVersionId;   
         @InvocableVariable public String envContentDocVarName;        
-        @InvocableVariable public String envTemplateNameVarName;      
+        @InvocableVariable public String envTemplateNameVarName;  
+        @InvocableVariable public String sahAgreementType;
     }
 
     @InvocableMethod(label='Generate Agreement (auto by Funding Source)')
@@ -22,22 +23,53 @@ public without sharing class MC_OpportunityDocGen_Agreements {
     private static final String ENV_NDIS  = 'NDIS_Agreement_ContentId';
     private static final String ENV_GEN   = 'Service_Agreement_ContentId';
     private static final String ENV_CHSP   = 'CHSP_Agreement_ContentId';
+    private static final String ENV_SAHATHM   = 'SAH_Agreement_ATHM_ContentId';
 
-    private static String pickEnvKeyByFunding(String fundingSource, String fundingType) {
+    private static String pickEnvKeyByFunding(String fundingSource, String fundingType, String budgetType) {
         if (String.isBlank(fundingSource)) return ENV_GEN;
         String fs = fundingSource.trim();
         String ft = fundingType != null ? fundingType.trim() : '';
         if(fs == 'Block Funding' && ft == 'CHSP') {
             return ENV_CHSP;
         }
-        if (fs == 'Support at Home') return ENV_SAH;
+        if (fs == 'Support at Home')  {
+            if(budgetType == 'ATHMservices') {
+                return ENV_SAHATHM;
+            }
+            return ENV_SAH;
+        }
+            
         if (fs == 'NDIS')            return ENV_NDIS;
         return ENV_GEN;
     }
 
     private static void process(Wrapper w) {
-        Id oppId = w.recordIds[0];
-
+        //Id oppId = w.recordIds[0];
+        String recordId = String.valueOf(w.recordIds[0]);
+        Id oppId;
+        if (recordId.startsWith('006')) {
+            // If the record is an Opportunity
+            oppId = w.recordIds[0];
+        } else {
+            // Otherwise, query the related Opportunity__c from Service Agreement
+            maica_cc__Service_Agreement__c sa = [SELECT Id, Opportunity__c,Related_Opportunity__c 
+                FROM maica_cc__Service_Agreement__c 
+                WHERE Id = :w.recordIds[0] 
+                LIMIT 1
+            ];
+            if (sa.Related_Opportunity__c != null) {
+                oppId = sa.Related_Opportunity__c;
+            } else {
+                oppId = sa.Opportunity__c;
+            }
+            //oppId = sa.Opportunity__c;
+        }
+        String budgetType = w.sahAgreementType;
+        System.debug('budgetType===='+budgetType);
+        /*if(budgetType == null || budgetType != null) {
+            throw new AuraHandledException('Checkkkk');
+        }*/
+        
         /* -------- Opportunity -------- */
         Opportunity opp = null;
         List<Opportunity> oppRows = [
@@ -70,17 +102,55 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         if (opp.AccountId != null) {
             List<Account> accRows = [
                 SELECT Id, Name, Phone, PersonMobilePhone, PersonEmail, Salutation,
-                       FirstName, LastName, PersonBirthdate, PersonContactId, Description,
+                       FirstName, LastName, PersonBirthdate, PersonContactId, Description, PersonGenderIdentity,
                        Home_Address__Street__s, Home_Address__City__s, Home_Address__StateCode__s,
                        Home_Address__PostalCode__s, Home_Address__CountryCode__s, Region__c, maica_cc__NDIS_Number__pc, 
-                	   ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode, ShippingCountry,
-                	   BillingStreet, BillingCity, BillingState,BillingPostalCode, BillingCountry, PersonMailingCity, 
-                	   PersonMailingCountry, PersonMailingStreet, PersonMailingPostalCode, PersonMailingState,Payment_Method__c	
+                	   Naps_ID__c, Medicare_Number__c, MAC_number__c, ShippingStreet, ShippingCity, ShippingState, 
+                       ShippingPostalCode, ShippingCountry, BillingStreet, BillingCity, BillingState,BillingPostalCode, 
+                       BillingCountry, PersonMailingCity, PersonMailingCountry, PersonMailingStreet, PersonMailingPostalCode, 
+                       PersonMailingState,Payment_Method__c	
                 FROM Account
                 WHERE Id = :opp.AccountId
                 LIMIT 1
             ];
             if (!accRows.isEmpty()) acc = accRows[0];
+            
+            /* -------- SAH Serrvice Agreement validation Required fields on Account -------- */
+            if (opp.Funding_Source__c == 'Support at Home') {
+             
+                List<String> missingFields = new List<String>();
+             
+                if (acc == null) {
+                    throw new AuraHandledException('Account is missing for this Opportunity.');
+                }
+                if (String.isBlank(acc.Name)) {
+                    missingFields.add('Name');
+                }
+                if (acc.PersonBirthdate == null) {
+                    missingFields.add('PersonBirthdate');
+                }
+                if (String.isBlank((String)acc.get('PersonGenderIdentity'))) {
+                    missingFields.add('Gender');
+                }
+                if(String.isBlank((String)acc.get('Naps_ID__c'))){
+                    missingFields.add('Naps_ID__c');
+                }
+                if(String.isBlank((String)acc.get('Medicare_Number__c'))){
+                    missingFields.add('Medicare_Number__c');
+                }
+                if(String.isBlank((String)acc.get('MAC_number__c'))){
+                    missingFields.add('MAC_number__c');
+                }
+                if (!missingFields.isEmpty()) {
+                    AuraHandledException e = new AuraHandledException(
+                     'ERROR_MSG::Please fill mandatory Account fields before generating SAH Agreement: '+ String.join(missingFields, ', ')
+                    );
+                    e.setMessage(
+                     'ERROR_MSG::Please fill mandatory Account fields before generating SAH Agreement: '+ String.join(missingFields, ', ')
+                    );
+                    throw e;
+                }
+            }
         }
         
         // Funding Administrator Lookup (Account)
@@ -436,7 +506,10 @@ public without sharing class MC_OpportunityDocGen_Agreements {
             );
             row.put('ServiceFrequency', oli.Service_Frequency__c);
             row.put('Quantity', oli.Quantity);
-            row.put('UnitPrice', oli.UnitPrice);
+            row.put(
+                'UnitPrice',
+                oli.UnitPrice != null ? '$' + String.valueOf(oli.UnitPrice.setScale(2)) : '$0.00'
+            );
             row.put('TotalPrice', oli.TotalPrice);
          
             productOut.add(row);
@@ -832,7 +905,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         String contentVersionId = w.templateContentVersionId;
         String envKey = !String.isBlank(w.envContentDocVarName)
                         ? w.envContentDocVarName
-                        : pickEnvKeyByFunding(opp.Funding_Source__c, opp.Funding_Type__c);
+                        : pickEnvKeyByFunding(opp.Funding_Source__c, opp.Funding_Type__c,budgetType );
 
         // Fetch ENV values
         Map<String,String> envMap = getEnvValuesByNames(new Set<String>{ envKey });
@@ -851,7 +924,11 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                 LIMIT 1
             ];
             if (cv.isEmpty()) {
-                throw new AuraHandledException('No ContentVersion found for ContentDocumentId ' + contentDocumentIdStr);
+                AuraHandledException e = new AuraHandledException(
+                 'ERROR_MSG::No ContentVersion found for ContentDocumentId ' + contentDocumentIdStr);
+                e.setMessage(
+                'ERROR_MSG::No ContentVersion found for ContentDocumentId ' + contentDocumentIdStr);
+                throw e;
             }
             contentVersionId = cv[0].Id;
         }
@@ -861,7 +938,7 @@ public without sharing class MC_OpportunityDocGen_Agreements {
                               : (!String.isBlank(w.envTemplateNameVarName)
                                     ? getEnvValuesByNames(new Set<String>{ w.envTemplateNameVarName }).get(w.envTemplateNameVarName)
                                     : DEFAULT_TEMPLATE_NAME);
-
+        System.debug('templateName===================='+templateName);
         List<DocumentTemplate> tmplRows = [
             SELECT Id, Name
             FROM DocumentTemplate
@@ -892,7 +969,8 @@ public without sharing class MC_OpportunityDocGen_Agreements {
         DocumentGenerationProcess dgp = new DocumentGenerationProcess();
         dgp.Type                 = 'Generate';           // DOCX output
         dgp.RequestText          = JSON.serialize(req);
-        dgp.ReferenceObject      = opp.Id;               // File will appear on Opportunity → Files
+        dgp.ReferenceObject      = w.recordIds[0];
+        //dgp.ReferenceObject      = opp.Id;               // File will appear on Opportunity → Files
         dgp.TokenData            = JSON.serialize(token);
         dgp.DocGenApiVersionType = 'Advanced';
         dgp.DocumentTemplateId   = tmpl.Id;
