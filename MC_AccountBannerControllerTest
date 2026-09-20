@@ -1,243 +1,362 @@
+/**
+ * @description Test class for MC_AccountBannerController.
+ *
+ * ASSUMPTIONS (verify once in your org - the helpers assert them, so a wrong
+ * assumption fails loudly in setup instead of giving a misleading result):
+ *  1. Account.Age_Formula__c is derived from PersonBirthdate (Person Account).
+ *  2. Service Agreement Status is derived from Start/End Date (Status can't be
+ *     assigned directly - it was commented out in the earlier draft).
+ *  3. MC_AccountBannerController.calculateAge is marked @TestVisible.
+ *  4. 'Block Funding' is a valid Funding_Source__c for HACC-PYP and CHSP
+ *     (Funding_Type__c is a dependent picklist).
+ */
 @isTest
 private class MC_AccountBannerControllerTest {
 
     private static final String FUNDING_TYPE_HACC_PYP = 'HACC-PYP';
-    private static final String FUNDING_TYPE_CHSP      = 'CHSP';
-    private static final String STATUS_ACTIVE          = 'Active';
-    private static final String STATUS_INACTIVE        = 'Inactive';
+    private static final String FUNDING_TYPE_CHSP     = 'CHSP';
+    private static final String STATUS_ACTIVE         = 'Active';
+    private static final String BANNER_MESSAGE        = 'Client is 65 years old';
 
-    // Funding_Type__c is a dependent picklist controlled by Funding_Source__c
-    // (same pattern as MC_AppointmentTriggerHelperTest). Mapping below is a
-    // best guess since HACC-PYP/CHSP source mappings weren't in the class
-    // under test - confirm against the actual field dependency in your org
-    // and adjust if the insert throws INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST.
-    private static final String FUNDING_SOURCE_HACC_PYP = 'Block Funding'; // TODO: verify
-    private static final String FUNDING_SOURCE_CHSP     = 'Block Funding'; // TODO: verify
+    // TODO: verify against the Funding_Source__c -> Funding_Type__c dependency
+    private static final String FUNDING_SOURCE_HACC_PYP = 'Block Funding';
+    private static final String FUNDING_SOURCE_CHSP     = 'Block Funding';
+
+    private static final String ADMIN_USERNAME_PREFIX = 'mcbannertest.admin.';
+    private static final String MIN_USERNAME_PREFIX   = 'mcbannertest.min.';
+
+    private static maica_cc__Price_List__c priceList;
 
     // ------------------------------------------------------------------
-    // ASSUMPTION: Age_Formula__c is a formula on the Account that derives
-    // age from PersonBirthdate - i.e. these are Person Accounts. That fits
-    // with the controller querying Contact off AccountId directly (Person
-    // Accounts auto-create exactly one Contact per Account). If that's
-    // wrong for your org, replace PersonBirthdate below with whatever
-    // date field actually drives the formula - do NOT set Age_Formula__c
-    // directly, formula fields can't be assigned.
-    //
-    // Since Person Accounts require a Person Account RecordTypeId, this
-    // looks it up dynamically instead of hardcoding a name. If Person
-    // Accounts aren't enabled in this org, this query returns null and
-    // these helpers need rework around the real age-driving field/object.
+    // Setup: users only (setup objects). Records are created inside each
+    // test to avoid MIXED_DML_OPERATION with the User inserts.
     // ------------------------------------------------------------------
-    private static Id personAccountRecordTypeId() {
-        List<RecordType> rts = [
-            SELECT Id FROM RecordType
-            WHERE SObjectType = 'Account' AND IsPersonType = true
-            LIMIT 1
-        ];
-        return rts.isEmpty() ? null : rts[0].Id;
+    @TestSetup
+    static void setupUsers() {
+        Long stamp = Datetime.now().getTime();
+        List<User> users = new List<User>();
+
+        Profile adminProfile = [SELECT Id FROM Profile WHERE Name = 'System Administrator' LIMIT 1];
+        users.add(buildUser(adminProfile.Id, 'bnradm', ADMIN_USERNAME_PREFIX + stamp + '@mc-test.example.com'));
+
+        List<Profile> minProfiles = [SELECT Id FROM Profile WHERE Name = 'Minimum Access - Salesforce' LIMIT 1];
+        if (!minProfiles.isEmpty()) {
+            users.add(buildUser(minProfiles[0].Id, 'bnrmin', MIN_USERNAME_PREFIX + stamp + '@mc-test.example.com'));
+        }
+        insert users;
+    }
+
+    private static User buildUser(Id profileId, String alias, String username) {
+        return new User(
+            FirstName         = 'Banner',
+            LastName          = 'TestUser',
+            Alias             = alias,
+            Email             = 'bannertest@mc-test.example.com',
+            Username          = username,
+            ProfileId         = profileId,
+            TimeZoneSidKey    = 'Australia/Perth',
+            LocaleSidKey      = 'en_AU',
+            EmailEncodingKey  = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+    }
+
+    private static User getUser(String usernamePrefix) {
+        String pattern = usernamePrefix + '%';
+        List<User> users = [SELECT Id FROM User WHERE Username LIKE :pattern LIMIT 1];
+        return users.isEmpty() ? null : users[0];
+    }
+
+    // ------------------------------------------------------------------
+    // Data helpers
+    // ------------------------------------------------------------------
+
+    /** Person Account (via factory) with a birthdate giving the expected age. */
+    private static Account createPersonAccountWithAge(Date birthdate, Integer expectedAge) {
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        acc.PersonBirthdate = birthdate;
+        update acc;
+
+        Account queried = [SELECT Age_Formula__c FROM Account WHERE Id = :acc.Id];
+        Assert.areEqual(expectedAge, Integer.valueOf(queried.Age_Formula__c),
+            'Setup check: Age_Formula__c should be derived from PersonBirthdate');
+        return acc;
     }
 
     private static Account createEligibleAccount() {
-        Account acc = new Account(Name = 'Eligible Test Account');
-        acc.RecordTypeId = personAccountRecordTypeId(); // <-- remove if not a Person Account org
-        acc.PersonBirthdate = Date.today().addYears(-65); // <-- adjust field/logic if not a Person Account org
-        insert acc;
-        return acc;
+        return createPersonAccountWithAge(Date.today().addYears(-65), 65);
     }
 
-    private static Account createIneligibleAccount() {
-        Account acc = new Account(Name = 'Ineligible Test Account');
-        acc.RecordTypeId = personAccountRecordTypeId();
-        acc.PersonBirthdate = Date.today().addYears(-40); // deliberately not 65
-        insert acc;
-        return acc;
+    private static Id getPersonContactId(Id accountId) {
+        return [SELECT PersonContactId FROM Account WHERE Id = :accountId].PersonContactId;
     }
 
-    // Person Accounts auto-create their single Contact on insert - we fetch
-    // it rather than inserting a new one (inserting a second Contact under
-    // a Person Account either fails or is semantically wrong here, since
-    // getBannerInfo relies on there being exactly one Contact per Account).
-    private static Contact getContactForAccount(Id accountId) {
-        return [
-            SELECT Id FROM Contact WHERE AccountId = :accountId LIMIT 1
-        ];
-    }
-
-    // Mirrors MC_AppointmentTriggerHelperTest.createServiceAgreement:
-    // resolves the correct Funding_Source__c for the given Funding_Type__c,
-    // and populates the Start/End Date fields likely required on the object.
-    private static maica_cc__Service_Agreement__c createAgreement(
-        Id participantId, String fundingType, String status
-    ) {
-        String fundingSource;
-        if (fundingType == FUNDING_TYPE_HACC_PYP) {
-            fundingSource = FUNDING_SOURCE_HACC_PYP;
-        } else if (fundingType == FUNDING_TYPE_CHSP) {
-            fundingSource = FUNDING_SOURCE_CHSP;
-        } else {
-            fundingSource = fundingType; // fallback for any other caller-supplied value
+    private static maica_cc__Price_List__c getPriceList() {
+        if (priceList == null) {
+            priceList = new maica_cc__Price_List__c(
+                Name                        = 'Test Pricebook',
+                maica_cc__Funding_Source__c = 'Self Funded',
+                maica_cc__Pricing_Structure__c = 'Default',
+                maica_cc__Active__c         = true
+            );
+            insert priceList;
         }
+        return priceList;
+    }
+
+    /** Active = current dates; inactive = already expired. Status is date-driven. */
+    private static maica_cc__Service_Agreement__c createAgreement(
+        Account acc, String fundingType, Boolean isActive
+    ) {
+        String fundingSource = (fundingType == FUNDING_TYPE_HACC_PYP)
+            ? FUNDING_SOURCE_HACC_PYP : FUNDING_SOURCE_CHSP;
 
         maica_cc__Service_Agreement__c sa = new maica_cc__Service_Agreement__c(
-            maica_cc__Participant__c    = participantId,
-            maica_cc__Funding_Source__c = fundingSource,
-            maica_cc__Funding_Type__c   = fundingType,
-           // maica_cc__Status__c         = status,
-            maica_cc__Start_Date__c     = Date.today().addDays(-1),
-            maica_cc__End_Date__c       = Date.today().addDays(10)
-            // TODO: add any other required fields for your org
+            Name                              = 'Test Service Agreement',
+            maica_cc__Participant__c          = getPersonContactId(acc.Id),
+            maica_cc__Service_Provider__c     = acc.Id,
+            maica_cc__Funding_Administrator__c = acc.Id,
+            maica_cc__Funding_Source__c       = fundingSource,
+            maica_cc__Funding_Type__c         = fundingType,
+            maica_cc__Price_List__c           = getPriceList().Id,
+            Opportunity_Owner_Email__c        = 'test@test.com',
+            maica_cc__Start_Date__c           = isActive ? Date.today().addDays(-1)  : Date.today().addDays(-30),
+            maica_cc__End_Date__c             = isActive ? Date.today().addDays(10)  : Date.today().addDays(-1)
         );
         insert sa;
+
+        maica_cc__Service_Agreement__c queried =
+            [SELECT maica_cc__Status__c FROM maica_cc__Service_Agreement__c WHERE Id = :sa.Id];
+        Assert.areEqual(isActive, queried.maica_cc__Status__c == STATUS_ACTIVE,
+            'Setup check: agreement Status should be driven by Start/End Date. Actual Status: '
+            + queried.maica_cc__Status__c);
         return sa;
     }
 
-    // ------------------------------------------------------------------
-    // 1. Null accountId -> immediate false, no queries
-    // ------------------------------------------------------------------
-    @isTest
-    static void testNullAccountId() {
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(null);
+    /** Runs the controller as the admin test user (WITH USER_MODE needs real access). */
+    private static MC_AccountBannerController.BannerResult runBanner(Id accountId) {
+        MC_AccountBannerController.BannerResult result;
+        System.runAs(getUser(ADMIN_USERNAME_PREFIX)) {
+            Test.startTest();
+            result = MC_AccountBannerController.getBannerInfo(accountId);
+            Test.stopTest();
+        }
+        return result;
+    }
 
-        System.assertEquals(false, result.showBanner);
-        System.assertEquals(null, result.message);
+    private static void assertNoBanner(MC_AccountBannerController.BannerResult result, String reason) {
+        Assert.isNotNull(result, 'Result should never be null');
+        Assert.isFalse(result.showBanner, reason);
+        Assert.isNull(result.message, 'Message should be null when the banner is hidden');
+    }
+
+    private static void assertBanner(MC_AccountBannerController.BannerResult result, String reason) {
+        Assert.isNotNull(result, 'Result should never be null');
+        Assert.isTrue(result.showBanner, reason);
+        Assert.areEqual(BANNER_MESSAGE, result.message, 'Banner message mismatch');
     }
 
     // ------------------------------------------------------------------
-    // 2. Account/Contact exists but Age_Formula__c != 65 -> no match
+    // 1. Null accountId -> early return
     // ------------------------------------------------------------------
     @isTest
-    static void testNoEligibleContacts() {
-        Account acc = createIneligibleAccount();
-
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(false, result.showBanner);
+    static void testNullAccountId_ReturnsNoBanner() {
+        MC_AccountBannerController.BannerResult result = runBanner(null);
+        assertNoBanner(result, 'Null accountId should not show the banner');
     }
 
     // ------------------------------------------------------------------
-    // 3. Eligible contact exists, but no Service Agreements at all
+    // 2. Account with no Contact (business account) -> contacts.isEmpty()
     // ------------------------------------------------------------------
     @isTest
-    static void testEligibleContactNoAgreements() {
+    static void testAccountWithoutContact_ReturnsNoBanner() {
+        Account acc = MC_TestDataFactory.grampiansAccountEmail();
+
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Account with no contact should not show the banner');
+    }
+
+    // ------------------------------------------------------------------
+    // 3. Age boundaries: 64 and 66 are not eligible, even with an active
+    //    HACC-PYP agreement (proves the age filter is what blocks it)
+    // ------------------------------------------------------------------
+    @isTest
+    static void testAge64_ReturnsNoBanner() {
+        Account acc = createPersonAccountWithAge(Date.today().addYears(-65).addDays(1), 64);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Age 64 should not show the banner');
+    }
+
+    @isTest
+    static void testAge66_ReturnsNoBanner() {
+        Account acc = createPersonAccountWithAge(Date.today().addYears(-66), 66);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Age 66 should not show the banner');
+    }
+
+    // ------------------------------------------------------------------
+    // 4. Eligible age, no agreements
+    // ------------------------------------------------------------------
+    @isTest
+    static void testEligibleAge_NoAgreements_ReturnsNoBanner() {
         Account acc = createEligibleAccount();
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(false, result.showBanner);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'No agreements should not show the banner');
     }
 
     // ------------------------------------------------------------------
-    // 4. Active HACC-PYP only -> banner shown
+    // 5. Active HACC-PYP only -> banner
     // ------------------------------------------------------------------
     @isTest
     static void testActiveHaccPypOnly_ShowsBanner() {
         Account acc = createEligibleAccount();
-        Contact c = getContactForAccount(acc.Id);
-        createAgreement(c.Id, FUNDING_TYPE_HACC_PYP, STATUS_ACTIVE);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(true, result.showBanner);
-        System.assertEquals('Client is 65 years old', result.message);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertBanner(result, 'Active HACC-PYP without CHSP should show the banner');
     }
 
     // ------------------------------------------------------------------
-    // 5. Active HACC-PYP AND active CHSP -> no banner
+    // 6. Active HACC-PYP and active CHSP -> no banner
     // ------------------------------------------------------------------
     @isTest
-    static void testActiveHaccPypAndChsp_NoBanner() {
+    static void testActiveHaccPypAndActiveChsp_ReturnsNoBanner() {
         Account acc = createEligibleAccount();
-        Contact c = getContactForAccount(acc.Id);
-        createAgreement(c.Id, FUNDING_TYPE_HACC_PYP, STATUS_ACTIVE);
-        createAgreement(c.Id, FUNDING_TYPE_CHSP, STATUS_ACTIVE);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+        createAgreement(acc, FUNDING_TYPE_CHSP, true);
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(false, result.showBanner);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Active CHSP alongside HACC-PYP should suppress the banner');
     }
 
     // ------------------------------------------------------------------
-    // 6. Active CHSP only -> no banner
+    // 7. Active CHSP only -> no banner
     // ------------------------------------------------------------------
     @isTest
-    static void testActiveChspOnly_NoBanner() {
+    static void testActiveChspOnly_ReturnsNoBanner() {
         Account acc = createEligibleAccount();
-        Contact c = getContactForAccount(acc.Id);
-        createAgreement(c.Id, FUNDING_TYPE_CHSP, STATUS_ACTIVE);
+        createAgreement(acc, FUNDING_TYPE_CHSP, true);
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(false, result.showBanner);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Active CHSP only should not show the banner');
     }
 
     // ------------------------------------------------------------------
-    // 7. HACC-PYP exists but Status != Active -> not counted, no banner
+    // 8. Inactive (expired) HACC-PYP only -> ignored, no banner
     // ------------------------------------------------------------------
     @isTest
-    static void testInactiveHaccPyp_NoBanner() {
+    static void testInactiveHaccPyp_ReturnsNoBanner() {
         Account acc = createEligibleAccount();
-        Contact c = getContactForAccount(acc.Id);
-        createAgreement(c.Id, FUNDING_TYPE_HACC_PYP, STATUS_INACTIVE);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, false);
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(false, result.showBanner);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertNoBanner(result, 'Inactive HACC-PYP should not count');
     }
 
     // ------------------------------------------------------------------
-    // 8. Multiple Service Agreements on the same eligible contact, mixed
-    //    funding types/statuses -> exercises the agreements loop across
-    //    more than one record while still resolving to "banner shown"
+    // 9. Active HACC-PYP + inactive CHSP -> inactive CHSP ignored, banner
     // ------------------------------------------------------------------
     @isTest
-    static void testMultipleAgreements_HaccPypActiveChspInactive_ShowsBanner() {
+    static void testActiveHaccPypInactiveChsp_ShowsBanner() {
         Account acc = createEligibleAccount();
-        Contact c = getContactForAccount(acc.Id);
-        createAgreement(c.Id, FUNDING_TYPE_HACC_PYP, STATUS_ACTIVE);
-        createAgreement(c.Id, FUNDING_TYPE_CHSP, STATUS_INACTIVE);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+        createAgreement(acc, FUNDING_TYPE_CHSP, false);
 
-        Test.startTest();
-        MC_AccountBannerController.BannerResult result =
-            MC_AccountBannerController.getBannerInfo(acc.Id);
-        Test.stopTest();
-
-        System.assertEquals(true, result.showBanner);
-        System.assertEquals('Client is 65 years old', result.message);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertBanner(result, 'Inactive CHSP should not suppress the banner');
     }
 
     // ------------------------------------------------------------------
-    // 9. Optional: only runs if you add `@TestVisible` to calculateAge
-    //    in the controller. Uncomment to cover the otherwise-dead method.
+    // 10. Multiple active HACC-PYP agreements -> still a single banner
     // ------------------------------------------------------------------
-    /*
     @isTest
-    static void testCalculateAge() {
-        Date birthdateNotYetOccurred = Date.today().addYears(-30).addDays(1);
-        Integer age = MC_AccountBannerController.calculateAge(birthdateNotYetOccurred);
-        System.assertEquals(29, age);
+    static void testMultipleActiveHaccPyp_ShowsBanner() {
+        Account acc = createEligibleAccount();
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, true);
+        createAgreement(acc, FUNDING_TYPE_HACC_PYP, false);
 
-        Date birthdateAlreadyOccurred = Date.today().addYears(-30).addDays(-1);
-        Integer age2 = MC_AccountBannerController.calculateAge(birthdateAlreadyOccurred);
-        System.assertEquals(30, age2);
+        MC_AccountBannerController.BannerResult result = runBanner(acc.Id);
+        assertBanner(result, 'Multiple HACC-PYP agreements should still show the banner');
     }
-    */
+
+    // ------------------------------------------------------------------
+    // 11. Agreements belonging to a different participant are not counted
+    // ------------------------------------------------------------------
+    @isTest
+    static void testAgreementOnDifferentParticipant_ReturnsNoBanner() {
+        Account eligibleAcc = createEligibleAccount();
+        Account otherAcc    = createEligibleAccount();
+        createAgreement(otherAcc, FUNDING_TYPE_HACC_PYP, true);
+
+        MC_AccountBannerController.BannerResult result = runBanner(eligibleAcc.Id);
+        assertNoBanner(result, 'Another participant\'s agreement must not trigger the banner');
+    }
+
+    // ------------------------------------------------------------------
+    // 12. WITH USER_MODE: user without object access -> QueryException
+    // ------------------------------------------------------------------
+    @isTest
+    static void testUserWithoutAccess_ThrowsQueryException() {
+        Account acc = createEligibleAccount();
+        User minUser = getUser(MIN_USERNAME_PREFIX);
+        Assert.isNotNull(minUser, 'Minimum Access - Salesforce profile is required for this test');
+
+        Boolean exceptionThrown = false;
+        System.runAs(minUser) {
+            Test.startTest();
+            try {
+                MC_AccountBannerController.getBannerInfo(acc.Id);
+            } catch (QueryException e) {
+                exceptionThrown = true;
+            }
+            Test.stopTest();
+        }
+        Assert.isTrue(exceptionThrown, 'WITH USER_MODE should block a user with no object access');
+    }
+
+    // ------------------------------------------------------------------
+    // 13. calculateAge (needs @TestVisible on the controller method).
+    //     Covers: birthday later this month/year, earlier this month/year,
+    //     and birthday today.
+    // ------------------------------------------------------------------
+    @isTest
+    static void testCalculateAge_BirthdayLaterThisYear_MonthAhead() {
+        Date birthdate = Date.today().addYears(-30).addMonths(1);
+        Assert.areEqual(29, MC_AccountBannerController.calculateAge(birthdate),
+            'Birthday month not reached yet: age should be one less');
+    }
+
+    @isTest
+    static void testCalculateAge_BirthdayTomorrow() {
+        Date birthdate = Date.today().addYears(-30).addDays(1);
+        Assert.areEqual(29, MC_AccountBannerController.calculateAge(birthdate),
+            'Birthday tomorrow: age should be one less');
+    }
+
+    @isTest
+    static void testCalculateAge_BirthdayToday() {
+        Date birthdate = Date.today().addYears(-30);
+        Assert.areEqual(30, MC_AccountBannerController.calculateAge(birthdate),
+            'Birthday today: age should match the year difference');
+    }
+
+    @isTest
+    static void testCalculateAge_BirthdayAlreadyOccurred() {
+        Date birthdate = Date.today().addYears(-30).addDays(-1);
+        Assert.areEqual(30, MC_AccountBannerController.calculateAge(birthdate),
+            'Birthday already passed: age should match the year difference');
+    }
+
+    @isTest
+    static void testCalculateAge_BirthdayMonthAlreadyPassed() {
+        Date birthdate = Date.today().addYears(-30).addMonths(-1);
+        Assert.areEqual(30, MC_AccountBannerController.calculateAge(birthdate),
+            'Birthday month already passed: age should match the year difference');
+    }
 }
