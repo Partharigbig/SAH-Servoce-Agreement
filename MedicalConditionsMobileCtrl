@@ -1,0 +1,357 @@
+public with sharing class MedicalConditionsMobileCtrl {
+
+    /* =====================================================================
+       ORIGINAL METHODS - used by the internal Lightning Experience components
+       ===================================================================== */
+
+    @AuraEnabled(cacheable=true)
+    public static Id getRecordTypeIdByDeveloperName(String sobjectApiName, String developerName) {
+        System.debug('### sobjectApiName=' + sobjectApiName);
+        System.debug('### developerName=' + developerName);
+        if (String.isBlank(sobjectApiName) || String.isBlank(developerName)) return null;
+        try {
+            RecordType rt = [
+                SELECT Id
+                FROM RecordType
+                WHERE SObjectType = :sobjectApiName AND DeveloperName = :developerName
+                LIMIT 1
+            ];
+            System.debug('### RT FOUND=' + rt.Id);
+            return rt != null ? rt.Id : null;
+        } catch (Exception e) {
+            System.debug('### ERROR=' + e.getMessage());
+            return null;
+        }
+    }
+
+    // NOTE: nonce param lets us bust cache on refresh
+    @AuraEnabled(cacheable=true)
+    public static List<SObject> getChildren(
+        Id parentId,
+        String childObjectApiName,
+        String parentLookupFieldApiName,
+        List<String> fieldApiNames,
+        Id recordTypeId,
+        Integer limitSize,
+        Integer nonce
+    ) {
+        System.debug('### parentId=' + parentId);
+        System.debug('### childObjectApiName=' + childObjectApiName);
+        System.debug('### lookupField=' + parentLookupFieldApiName);
+        System.debug('### recordTypeId=' + recordTypeId);
+        if (parentId == null || String.isBlank(childObjectApiName) || String.isBlank(parentLookupFieldApiName)) {
+            return new List<SObject>();
+        }
+        Set<String> fields = new Set<String>();
+        if (fieldApiNames != null) fields.addAll(fieldApiNames);
+        fields.add('Id'); fields.add('Name'); fields.add('RecordTypeId'); fields.add('RecordType.Name');
+
+        String soql =
+            'SELECT ' + String.join(new List<String>(fields), ',') +
+            ' FROM ' + childObjectApiName +
+            ' WHERE ' + parentLookupFieldApiName + ' = :parentId' +
+            (recordTypeId == null ? '' : ' AND RecordTypeId = :recordTypeId') +
+            ' ORDER BY CreatedDate DESC' +
+            (limitSize != null && limitSize > 0 ? ' LIMIT :limitSize' : '');
+        System.debug('### SOQL=' + soql);
+        return Database.query(soql);
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Integer countChildren(
+        Id parentId,
+        String childObjectApiName,
+        String parentLookupFieldApiName,
+        Id recordTypeId
+    ) {
+        if (parentId == null || String.isBlank(childObjectApiName) || String.isBlank(parentLookupFieldApiName)) {
+            return 0;
+        }
+        String soql = 'SELECT COUNT() FROM ' + childObjectApiName +
+                      ' WHERE ' + parentLookupFieldApiName + ' = :parentId' +
+                      (recordTypeId == null ? '' : ' AND RecordTypeId = :recordTypeId');
+        return (Integer)Database.countQuery(soql);
+    }
+
+    /* =====================================================================
+       EXPERIENCE CLOUD ONLY - used by communityMedicalRelatedList
+       ===================================================================== */
+
+    @AuraEnabled
+    public static RelatedListResult getRelatedList(
+        String parentId,
+        String childObjectApiName,
+        String parentLookupFieldApiName,
+        List<String> fieldApiNames,
+        String recordTypeDeveloperName,
+        Integer limitSize
+    ) {
+        RelatedListResult res = new RelatedListResult();
+
+        Id pid = toId(parentId);
+        if (pid == null) {
+            res.message = 'This component did not receive a record Id.';
+            return res;
+        }
+
+        Schema.DescribeSObjectResult childDesc = describeObject(childObjectApiName);
+        if (childDesc == null) {
+            res.message = 'Object "' + childObjectApiName + '" does not exist in this org.';
+            return res;
+        }
+        res.objectLabel = childDesc.getLabelPlural();
+
+        if (!childDesc.isAccessible()) {
+            res.message = 'You do not have read access to ' + childDesc.getLabelPlural() + '.';
+            return res;
+        }
+        res.accessible = true;
+        res.createable = childDesc.isCreateable();
+        res.updateable = childDesc.isUpdateable();
+
+        String lookup = resolveFilterableField(childDesc, parentLookupFieldApiName);
+        if (lookup == null) {
+            res.message = 'Lookup field "' + parentLookupFieldApiName + '" does not exist on ' +
+                          childDesc.getName() + ', or cannot be filtered on.';
+            return res;
+        }
+
+        // A blank developer name is a valid setup - it means "do not filter by record type".
+        if (String.isNotBlank(recordTypeDeveloperName)) {
+            res.recordTypeId = resolveRecordTypeId(childDesc, recordTypeDeveloperName);
+            if (res.recordTypeId == null) {
+                res.message = 'Record Type "' + recordTypeDeveloperName + '" was not found on ' +
+                              childDesc.getName() + '.';
+                return res;
+            }
+        }
+
+        FieldPlan plan = planFields(childDesc, fieldApiNames);
+        res.fields = plan.selected;
+        res.skippedFields = plan.skipped;
+
+        // Anything unexpected past this point is wrapped, so the component shows the reason
+        // instead of the framework's opaque "there was a problem" page.
+        try {
+            res.totalCount = countFor(childDesc, lookup, pid, res.recordTypeId);
+            res.records = flatten(queryFor(childDesc, plan, lookup, pid, res.recordTypeId, limitSize), plan.selected);
+        } catch (Exception e) {
+            throw new AuraHandledException(e.getTypeName() + ': ' + e.getMessage());
+        }
+        return res;
+    }
+
+    private static List<SObject> queryFor(
+        Schema.DescribeSObjectResult objDesc,
+        FieldPlan plan,
+        String lookup,
+        Id pid,
+        Id rtId,
+        Integer limitSize
+    ) {
+        Integer lim = (limitSize != null && limitSize > 0) ? limitSize : 0;
+
+        String soql = 'SELECT ' + String.join(plan.selected, ', ') +
+                      ' FROM ' + objDesc.getName() +
+                      ' WHERE ' + lookup + ' = :pid';
+        if (rtId != null && plan.hasRecordType) {
+            soql += ' AND RecordTypeId = :rtId';
+        }
+        soql += ' ORDER BY CreatedDate DESC';
+        if (lim > 0) {
+            soql += ' LIMIT :lim';
+        }
+        return Database.query(soql);
+    }
+
+    private static Integer countFor(Schema.DescribeSObjectResult objDesc, String lookup, Id pid, Id rtId) {
+        String soql = 'SELECT COUNT() FROM ' + objDesc.getName() + ' WHERE ' + lookup + ' = :pid';
+        if (rtId != null && hasField(objDesc, 'RecordTypeId')) {
+            soql += ' AND RecordTypeId = :rtId';
+        }
+        return Database.countQuery(soql);
+    }
+
+    /**
+     * Collapses each record into a plain map keyed by the requested path, with dots replaced by
+     * underscores so 'RecordType.Name' arrives as a flat 'RecordType_Name' the datatable can
+     * bind to. A bare List<SObject> is also unreliable as a property of a wrapper class at the
+     * Aura serialisation boundary, which surfaced as the platform's generic error page.
+     */
+    private static List<Map<String, Object>> flatten(List<SObject> records, List<String> paths) {
+        List<Map<String, Object>> rows = new List<Map<String, Object>>();
+        for (SObject record : records) {
+            Map<String, Object> row = new Map<String, Object>();
+            for (String path : paths) {
+                List<String> parts = path.split('\\.');
+                SObject cursor = record;
+                Object value = null;
+                for (Integer i = 0; i < parts.size(); i++) {
+                    if (cursor == null) {
+                        break;
+                    }
+                    if (i == parts.size() - 1) {
+                        value = cursor.get(parts[i]);
+                    } else {
+                        cursor = cursor.getSObject(parts[i]);
+                    }
+                }
+                row.put(path.replace('.', '_'), value);
+            }
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /**
+     * Works out which of the configured fields can actually be selected. Anything that does not
+     * resolve is reported back rather than left in the SOQL, where one bad name would fail the
+     * whole query and leave the component showing nothing.
+     */
+    private static FieldPlan planFields(Schema.DescribeSObjectResult objDesc, List<String> requested) {
+        FieldPlan plan = new FieldPlan();
+        Set<String> seen = new Set<String>{ 'id' };
+        plan.selected.add('Id');
+
+        List<String> incoming = requested == null ? new List<String>() : requested;
+        for (String raw : incoming) {
+            String path = raw == null ? '' : raw.trim();
+            if (String.isBlank(path)) {
+                continue;
+            }
+            String resolved = resolvePath(objDesc, path);
+            if (resolved == null) {
+                plan.skipped.add(path);
+            } else if (seen.add(resolved.toLowerCase())) {
+                plan.selected.add(resolved);
+            }
+        }
+
+        // Name and record type back the component chrome, but neither is guaranteed to exist -
+        // an object with no record types has no RecordTypeId field at all.
+        for (String extra : new List<String>{ 'Name', 'RecordTypeId', 'RecordType.Name' }) {
+            String resolved = resolvePath(objDesc, extra);
+            if (resolved != null && seen.add(resolved.toLowerCase())) {
+                plan.selected.add(resolved);
+            }
+        }
+        plan.hasRecordType = hasField(objDesc, 'RecordTypeId');
+        return plan;
+    }
+
+    /** Resolves `Field__c` or `Lookup__r.Field__c` to its canonical describe casing, else null. */
+    private static String resolvePath(Schema.DescribeSObjectResult objDesc, String path) {
+        List<String> parts = path.split('\\.');
+        Schema.DescribeSObjectResult current = objDesc;
+        List<String> canonical = new List<String>();
+
+        for (Integer i = 0; i < parts.size(); i++) {
+            String token = parts[i].trim();
+            if (String.isBlank(token) || current == null) {
+                return null;
+            }
+
+            if (i == parts.size() - 1) {
+                Schema.SObjectField f = fieldToken(current, token);
+                if (f == null) {
+                    return null;
+                }
+                canonical.add(f.getDescribe().getName());
+            } else {
+                Schema.DescribeFieldResult rel = relationshipField(current, token);
+                if (rel == null || rel.getReferenceTo().isEmpty()) {
+                    return null;
+                }
+                canonical.add(rel.getRelationshipName());
+                current = rel.getReferenceTo()[0].getDescribe();
+            }
+        }
+        return String.join(canonical, '.');
+    }
+
+    private static Schema.DescribeFieldResult relationshipField(
+        Schema.DescribeSObjectResult objDesc,
+        String relName
+    ) {
+        for (Schema.SObjectField f : objDesc.fields.getMap().values()) {
+            Schema.DescribeFieldResult dfr = f.getDescribe();
+            if (relName.equalsIgnoreCase(dfr.getRelationshipName())) {
+                return dfr;
+            }
+        }
+        return null;
+    }
+
+    private static String resolveFilterableField(Schema.DescribeSObjectResult objDesc, String apiName) {
+        if (String.isBlank(apiName)) {
+            return null;
+        }
+        Schema.SObjectField f = fieldToken(objDesc, apiName.trim());
+        if (f == null) {
+            return null;
+        }
+        Schema.DescribeFieldResult dfr = f.getDescribe();
+        return dfr.isFilterable() ? dfr.getName() : null;
+    }
+
+    private static Boolean hasField(Schema.DescribeSObjectResult objDesc, String apiName) {
+        return fieldToken(objDesc, apiName) != null;
+    }
+
+    /** The describe field map is keyed in lower case, so never trust the caller's casing. */
+    private static Schema.SObjectField fieldToken(Schema.DescribeSObjectResult objDesc, String apiName) {
+        Map<String, Schema.SObjectField> fieldMap = objDesc.fields.getMap();
+        Schema.SObjectField f = fieldMap.get(apiName);
+        return f != null ? f : fieldMap.get(apiName.toLowerCase());
+    }
+
+    private static Id resolveRecordTypeId(Schema.DescribeSObjectResult objDesc, String developerName) {
+        // Describe rather than SOQL on RecordType: community and guest users cannot always read
+        // those rows, and this costs nothing against the query limits.
+        Schema.RecordTypeInfo info = objDesc.getRecordTypeInfosByDeveloperName().get(developerName.trim());
+        return info == null ? null : info.getRecordTypeId();
+    }
+
+    private static Schema.DescribeSObjectResult describeObject(String apiName) {
+        if (String.isBlank(apiName)) {
+            return null;
+        }
+        Map<String, Schema.SObjectType> gd = Schema.getGlobalDescribe();
+        Schema.SObjectType t = gd.get(apiName.trim());
+        if (t == null) {
+            t = gd.get(apiName.trim().toLowerCase());
+        }
+        return t == null ? null : t.getDescribe();
+    }
+
+    /** Tolerates blanks and the unresolved `{!recordId}` expression an Experience Cloud page can pass. */
+    private static Id toId(String value) {
+        if (String.isBlank(value) || value.startsWith('{!')) {
+            return null;
+        }
+        try {
+            return Id.valueOf(value.trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public class RelatedListResult {
+        @AuraEnabled public List<Map<String, Object>> records = new List<Map<String, Object>>();
+        @AuraEnabled public Integer totalCount = 0;
+        @AuraEnabled public Id recordTypeId;
+        @AuraEnabled public List<String> fields = new List<String>();
+        @AuraEnabled public List<String> skippedFields = new List<String>();
+        @AuraEnabled public Boolean accessible = false;
+        @AuraEnabled public Boolean createable = false;
+        @AuraEnabled public Boolean updateable = false;
+        @AuraEnabled public String objectLabel;
+        @AuraEnabled public String message;
+    }
+
+    private class FieldPlan {
+        List<String> selected = new List<String>();
+        List<String> skipped = new List<String>();
+        Boolean hasRecordType = false;
+    }
+}
