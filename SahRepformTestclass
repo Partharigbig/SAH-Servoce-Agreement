@@ -1,0 +1,335 @@
+/**
+ * @description Test class for MC_AccountDocGen_SAHRepForm.
+ *
+ * Notes:
+ *  - Environment_Variables__mdt can't be created in a test, so the template
+ *    ContentVersionId / template name overrides on the Wrapper are used to
+ *    avoid depending on org metadata.
+ *  - DocumentGenerationProcess is only inserted when NOT running a test, so
+ *    success cases assert "no exception".
+ *  - AuraHandledException.getMessage() returns a generic message in tests
+ *    unless setMessage() is called, so we assert on the exception type.
+ *  - Runs as the executing user (DocumentTemplate / metadata access via
+ *    USER_MODE comes from permission sets a fresh test user wouldn't have).
+ *    Only the no-access test uses a separate user.
+ */
+@isTest
+private class MC_AccountDocGen_SAHRepFormTest {
+
+    private static final String DEFAULT_TEMPLATE_NAME = 'SAHAuthorisedRepresentativeFormTemplate';
+    private static final String CUSTOM_TEMPLATE_NAME  = 'MC_Test_SAH_Custom_Template';
+    private static final String MISSING_ENV_VAR       = 'MC_Test_Missing_Env_Var';
+    private static final String MIN_USERNAME_PREFIX   = 'mcsahtest.min.';
+
+    // ------------------------------------------------------------------
+    // Setup: user only (setup object) to avoid MIXED_DML_OPERATION
+    // ------------------------------------------------------------------
+    @TestSetup
+    static void setupUsers() {
+        List<Profile> minProfiles = [SELECT Id FROM Profile WHERE Name = 'Minimum Access - Salesforce' LIMIT 1];
+        if (minProfiles.isEmpty()) {
+            return;
+        }
+        insert new User(
+            FirstName         = 'SAH',
+            LastName          = 'TestUser',
+            Alias             = 'sahmin',
+            Email             = 'sahtest@mc-test.example.com',
+            Username          = MIN_USERNAME_PREFIX + Datetime.now().getTime() + '@mc-test.example.com',
+            ProfileId         = minProfiles[0].Id,
+            TimeZoneSidKey    = 'Australia/Perth',
+            LocaleSidKey      = 'en_AU',
+            EmailEncodingKey  = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+    }
+
+    private static User getMinAccessUser() {
+        String pattern = MIN_USERNAME_PREFIX + '%';
+        List<User> users = [SELECT Id FROM User WHERE Username LIKE :pattern LIMIT 1];
+        return users.isEmpty() ? null : users[0];
+    }
+
+    // ------------------------------------------------------------------
+    // Data helpers (built on MC_TestDataFactory)
+    // ------------------------------------------------------------------
+    private static Account createPersonAccountWithDetails() {
+        Account acc = MC_TestDataFactory.createPersonAccount(); // has Phone + PersonEmail
+        if (Account.Address__c.getDescribe().isUpdateable()) {
+            acc.put('Address__c', '46 Epworth St, OCEAN GROVE VIC 3226');
+            update acc;
+        }
+        return acc;
+    }
+
+    private static Id createTemplateContentVersion() {
+        return MC_TestDataFactory.createContentVersion().Id;
+    }
+
+    private static MC_AccountDocGen_SAHRepForm.Wrapper buildWrapper(
+        Id accountId, String templateName, Id contentVersionId
+    ) {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds                = new List<Id>{ accountId };
+        w.docTemplateName          = templateName;
+        w.templateContentVersionId = contentVersionId == null ? null : String.valueOf(contentVersionId);
+        return w;
+    }
+
+    /** Calls processAccount and returns whatever was thrown (null if nothing). */
+    private static Exception process(MC_AccountDocGen_SAHRepForm.Wrapper w) {
+        Exception caught;
+        Test.startTest();
+        try {
+            MC_AccountDocGen_SAHRepForm.processAccount(w);
+        } catch (Exception e) {
+            caught = e;
+        }
+        Test.stopTest();
+        return caught;
+    }
+
+    /** Calls the invocable entry point and returns whatever was thrown (null if nothing). */
+    private static Exception processViaFlow(List<MC_AccountDocGen_SAHRepForm.Wrapper> inputs) {
+        Exception caught;
+        Test.startTest();
+        try {
+            MC_AccountDocGen_SAHRepForm.generateFromAccountFlow(inputs);
+        } catch (Exception e) {
+            caught = e;
+        }
+        Test.stopTest();
+        return caught;
+    }
+
+    private static void assertAuraError(Exception ex, String reason) {
+        Assert.isInstanceOfType(ex, AuraHandledException.class, reason);
+    }
+
+    private static void assertNoError(Exception ex, String reason) {
+        Assert.isNull(ex, reason + ' - unexpected exception: ' + (ex == null ? '' : ex.getMessage()));
+    }
+
+    // ------------------------------------------------------------------
+    // 1. Invocable entry point: input validation
+    // ------------------------------------------------------------------
+    @isTest
+    static void testFlow_NullInputs_Throws() {
+        assertAuraError(processViaFlow(null), 'Null inputs should throw');
+    }
+
+    @isTest
+    static void testFlow_EmptyInputs_Throws() {
+        assertAuraError(processViaFlow(new List<MC_AccountDocGen_SAHRepForm.Wrapper>()), 'Empty inputs should throw');
+    }
+
+    @isTest
+    static void testFlow_NullWrapperElement_Throws() {
+        assertAuraError(
+            processViaFlow(new List<MC_AccountDocGen_SAHRepForm.Wrapper>{ null }),
+            'Null wrapper element should throw');
+    }
+
+    @isTest
+    static void testFlow_NullRecordIds_Throws() {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds = null;
+        assertAuraError(
+            processViaFlow(new List<MC_AccountDocGen_SAHRepForm.Wrapper>{ w }),
+            'Null recordIds should throw');
+    }
+
+    @isTest
+    static void testFlow_EmptyRecordIds_Throws() {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds = new List<Id>();
+        assertAuraError(
+            processViaFlow(new List<MC_AccountDocGen_SAHRepForm.Wrapper>{ w }),
+            'Empty recordIds should throw');
+    }
+
+    // ------------------------------------------------------------------
+    // 2. processAccount: input validation
+    // ------------------------------------------------------------------
+    @isTest
+    static void testProcessAccount_NullWrapper_Throws() {
+        assertAuraError(process(null), 'Null wrapper should throw');
+    }
+
+    @isTest
+    static void testProcessAccount_NullRecordIds_Throws() {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds = null;
+        assertAuraError(process(w), 'Null recordIds should throw');
+    }
+
+    @isTest
+    static void testProcessAccount_EmptyRecordIds_Throws() {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds = new List<Id>();
+        assertAuraError(process(w), 'Empty recordIds should throw');
+    }
+
+    @isTest
+    static void testProcessAccount_NullAccountId_Throws() {
+        MC_AccountDocGen_SAHRepForm.Wrapper w = new MC_AccountDocGen_SAHRepForm.Wrapper();
+        w.recordIds = new List<Id>{ null };
+        assertAuraError(process(w), 'A null Account Id should throw');
+    }
+
+    // ------------------------------------------------------------------
+    // 3. Account lookup
+    // ------------------------------------------------------------------
+    @isTest
+    static void testProcessAccount_AccountDoesNotExist_ThrowsQueryException() {
+        Account acc = createPersonAccountWithDetails();
+        Id deletedId = acc.Id;
+        delete acc;
+
+        Exception ex = process(buildWrapper(deletedId, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion()));
+        Assert.isInstanceOfType(ex, QueryException.class, 'A deleted/missing Account should fail the query');
+    }
+
+    @isTest
+    static void testProcessAccount_UserWithoutAccess_ThrowsQueryException() {
+        Account acc = createPersonAccountWithDetails();
+        Id cvId = createTemplateContentVersion();
+        User minUser = getMinAccessUser();
+        if (minUser == null) {
+            return; // 'Minimum Access - Salesforce' profile not available in this org
+        }
+
+        Exception ex;
+        System.runAs(minUser) {
+            ex = process(buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, cvId));
+        }
+        Assert.isInstanceOfType(ex, QueryException.class, 'WITH USER_MODE should block a user with no Account access');
+    }
+
+    // ------------------------------------------------------------------
+    // 4. Template ContentVersion resolution via ENV variable
+    // ------------------------------------------------------------------
+    @isTest
+    static void testProcessAccount_MissingEnvVariable_Throws() {
+        Account acc = createPersonAccountWithDetails();
+        MC_AccountDocGen_SAHRepForm.Wrapper w = buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, null);
+        w.envContentDocVarName = MISSING_ENV_VAR;
+
+        assertAuraError(process(w), 'Missing ENV variable and no ContentVersion override should throw');
+    }
+
+    /**
+     * Uses the default ENV key. Whatever the org holds for it, the run must end in an
+     * AuraHandledException: ENV missing/blank, ContentVersion not visible to the test,
+     * or (if both resolve) no default DocumentTemplate exists in this test.
+     */
+    @isTest
+    static void testProcessAccount_DefaultEnvVariable_NoOverride_Throws() {
+        Account acc = createPersonAccountWithDetails();
+        MC_AccountDocGen_SAHRepForm.Wrapper w = buildWrapper(acc.Id, null, null);
+
+        assertAuraError(process(w), 'Default ENV lookup without a resolvable template should throw');
+    }
+
+    // ------------------------------------------------------------------
+    // 5. DocumentTemplate resolution
+    // ------------------------------------------------------------------
+    @isTest
+    static void testProcessAccount_TemplateNotFound_Throws() {
+        Account acc = createPersonAccountWithDetails();
+
+        assertAuraError(
+            process(buildWrapper(acc.Id, 'MC_Test_No_Such_Template', createTemplateContentVersion())),
+            'Unknown template name should throw');
+    }
+
+    @isTest
+    static void testProcessAccount_TemplateNameFromMissingEnvVar_Throws() {
+        Account acc = createPersonAccountWithDetails();
+        MC_AccountDocGen_SAHRepForm.Wrapper w = buildWrapper(acc.Id, null, createTemplateContentVersion());
+        w.envTemplateNameVarName = MISSING_ENV_VAR; // resolves to a null template name
+
+        assertAuraError(process(w), 'Template name resolved from a missing ENV variable should throw');
+    }
+
+    @isTest
+    static void testProcessAccount_DefaultTemplateNameNotCreated_Throws() {
+        Account acc = createPersonAccountWithDetails();
+
+        assertAuraError(
+            process(buildWrapper(acc.Id, null, createTemplateContentVersion())),
+            'Default template name with no matching DocumentTemplate should throw');
+    }
+
+    // ------------------------------------------------------------------
+    // 6. Success paths
+    // ------------------------------------------------------------------
+    @isTest
+    static void testFlow_Success_WithOverrides() {
+        Account acc = createPersonAccountWithDetails();
+        MC_TestDataFactory.createDocumentTemplateForAssessment(CUSTOM_TEMPLATE_NAME);
+        MC_AccountDocGen_SAHRepForm.Wrapper w =
+            buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion());
+
+        assertNoError(
+            processViaFlow(new List<MC_AccountDocGen_SAHRepForm.Wrapper>{ w }),
+            'Flow entry point with valid overrides should succeed');
+    }
+
+    @isTest
+    static void testProcessAccount_Success_DefaultTemplateName() {
+        Account acc = createPersonAccountWithDetails();
+        MC_TestDataFactory.createDocumentTemplateForAssessment(DEFAULT_TEMPLATE_NAME);
+
+        assertNoError(
+            process(buildWrapper(acc.Id, null, createTemplateContentVersion())),
+            'Default template name should resolve when the DocumentTemplate exists');
+    }
+
+    @isTest
+    static void testProcessAccount_Success_CustomEnvVarNameWithContentVersionOverride() {
+        Account acc = createPersonAccountWithDetails();
+        MC_TestDataFactory.createDocumentTemplateForAssessment(CUSTOM_TEMPLATE_NAME);
+        MC_AccountDocGen_SAHRepForm.Wrapper w =
+            buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion());
+        w.envContentDocVarName = MISSING_ENV_VAR; // ContentVersion override wins, ENV value isn't needed
+
+        assertNoError(process(w), 'ContentVersion override should bypass the ENV ContentDocumentId lookup');
+    }
+
+    @isTest
+    static void testProcessAccount_Success_NullPhoneEmailAndAddress() {
+        Account acc = MC_TestDataFactory.grampiansAccountEmail(); // business account: no PersonEmail
+        acc.Phone = null;
+        update acc;
+        MC_TestDataFactory.createDocumentTemplateForAssessment(CUSTOM_TEMPLATE_NAME);
+
+        assertNoError(
+            process(buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion())),
+            'Null phone/email/address should be merged as blanks');
+    }
+
+    @isTest
+    static void testProcessAccount_Success_LongNameWithSpecialCharacters() {
+        Account acc = MC_TestDataFactory.grampiansAccountEmail();
+        acc.Name = 'O\'Brien & Sons: <Aged Care> #1 ' + 'X'.repeat(150); // forces title sanitising + truncation
+        update acc;
+        MC_TestDataFactory.createDocumentTemplateForAssessment(CUSTOM_TEMPLATE_NAME);
+
+        assertNoError(
+            process(buildWrapper(acc.Id, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion())),
+            'Long/special-character Account names should be sanitised, not fail');
+    }
+
+    @isTest
+    static void testProcessAccount_Success_MultipleRecordIds_UsesFirst() {
+        Account first  = createPersonAccountWithDetails();
+        Account second = createPersonAccountWithDetails();
+        MC_TestDataFactory.createDocumentTemplateForAssessment(CUSTOM_TEMPLATE_NAME);
+        MC_AccountDocGen_SAHRepForm.Wrapper w =
+            buildWrapper(first.Id, CUSTOM_TEMPLATE_NAME, createTemplateContentVersion());
+        w.recordIds.add(second.Id);
+
+        assertNoError(process(w), 'Only the first Account Id should be processed');
+    }
+}
