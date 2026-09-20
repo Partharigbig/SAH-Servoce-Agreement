@@ -1,0 +1,84 @@
+public without sharing class MC_AccountBannerController {
+
+    private static final String FUNDING_TYPE_HACC_PYP = 'HACC-PYP';
+    private static final String FUNDING_TYPE_CHSP = 'CHSP';
+    private static final String STATUS_ACTIVE = 'Active'; 
+
+    @AuraEnabled(cacheable=true)
+    public static BannerResult getBannerInfo(Id accountId) {
+        BannerResult result = new BannerResult();
+        result.showBanner = false;
+
+        if (accountId == null) {
+            return result;
+        }
+
+
+        List<Contact> contacts = [
+            SELECT Id
+            FROM Contact
+            WHERE AccountId = :accountId
+            AND Account.Age_Formula__c = 65
+            WITH USER_MODE
+        ];
+
+        if (contacts.isEmpty()) {
+            return result;
+        }
+
+        Set<Id> eligibleContactIds = new Set<Id>();
+        for (Contact c : contacts) {
+            if (contacts != null ) {
+                eligibleContactIds.add(c.Id);
+            }
+        }
+
+        if (eligibleContactIds.isEmpty()) {
+            return result;
+        }
+
+       
+        List<maica_cc__Service_Agreement__c> agreements = [
+            SELECT Id, maica_cc__Funding_Type__c, maica_cc__Status__c, maica_cc__Participant__c
+            FROM maica_cc__Service_Agreement__c
+            WHERE maica_cc__Participant__c IN :eligibleContactIds WITH USER_MODE
+        ];
+
+        Boolean hasActiveHaccPyp = false;
+        Boolean hasActiveChsp = false;
+
+        for (maica_cc__Service_Agreement__c sa : agreements) {
+            if (sa.maica_cc__Status__c == STATUS_ACTIVE) {
+                if (sa.maica_cc__Funding_Type__c == FUNDING_TYPE_HACC_PYP) {
+                    hasActiveHaccPyp = true;
+                } else if (sa.maica_cc__Funding_Type__c == FUNDING_TYPE_CHSP) {
+                    hasActiveChsp = true;
+                }
+            }
+        }
+
+                if (hasActiveHaccPyp && !hasActiveChsp) {
+            result.showBanner = true;
+            result.message = 'Client is 65 years old';
+        }
+
+        return result;
+    }
+
+    private static Integer calculateAge(Date birthdate) {
+        Date today = Date.today();
+        Integer age = today.year() - birthdate.year();
+        Boolean birthdayNotYetOccurred =
+            (today.month() < birthdate.month()) ||
+            (today.month() == birthdate.month() && today.day() < birthdate.day());
+        if (birthdayNotYetOccurred) {
+            age--;
+        }
+        return age;
+    }
+
+    public class BannerResult {
+        @AuraEnabled public Boolean showBanner;
+        @AuraEnabled public String message;
+    }
+}
