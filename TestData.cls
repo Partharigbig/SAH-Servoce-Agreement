@@ -27,11 +27,47 @@ public with sharing class MC_TestDataFactory {
     public static Account createPersonAccount() {
         Id recordTypeIdPersonAccount = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Person Account').getRecordTypeId();
         
-        Account acc = new Account(FirstName='Cilent1',LastName='Account',Phone = '1234567890',Website = 'www.example.com',RecordTypeId=recordTypeIdPersonAccount,
-                                       PersonEmail = 'testSales@apex.com');
+        Account acc = new Account(FirstName='Cilent1',LastName='Account',Phone = '+61412345678',Website = 'www.example.com',RecordTypeId=recordTypeIdPersonAccount,
+                                       PersonEmail = 'testSales@apex.com',Billing_Communication_Preference__c = 'Email',Opted_for_Direct_Debit__c = false);
         insert acc;
         return acc;
     }
+      public static Account createPostPrefAccount() {
+        Id recordTypeIdPersonAccount = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Person Account').getRecordTypeId();
+        
+        Account acc = new Account(FirstName='Cilent1',LastName='Account',Phone = '+61412345678',Website = 'www.example.com',RecordTypeId=recordTypeIdPersonAccount,
+                                       PersonEmail = 'testSales@apex.com', Billing_Communication_Preference__c = 'Post',Opted_for_Direct_Debit__c = false);
+        insert acc;
+        return acc;
+    }
+    
+    public static Account grampiansAccountPost(){
+        Id recordTypeIdPersonAccount = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Business Account').getRecordTypeId();
+        
+        Account acc = new Account(Name='Cilent1',Phone = '+61412345678',RecordTypeId=recordTypeIdPersonAccount,
+                                       BusinessEmail__c = 'testSales@apex.com', Billing_Communication_Preference__c = 'Post', Type = 'Grampians health');
+        insert acc;
+        return acc;
+    }
+    
+    public static Account grampiansAccountEmail(){
+        Id recordTypeIdPersonAccount = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Business Account').getRecordTypeId();
+        
+        Account acc = new Account(Name='Cilent1',Phone = '+61412345678',RecordTypeId=recordTypeIdPersonAccount,
+                                       BusinessEmail__c = 'testSales@apex.com', Billing_Communication_Preference__c = 'Email', Type = 'Grampians health');
+        insert acc;
+        return acc;
+    }
+    
+     public static Account TACAccount(){
+        Id recordTypeIdPersonAccount = Schema.getGlobalDescribe().get('Account').getDescribe().getRecordTypeInfosByName().get('Business Account').getRecordTypeId();
+        
+        Account acc = new Account(Name='Cilent1',Phone = '+61412345678',RecordTypeId=recordTypeIdPersonAccount,
+                                       BusinessEmail__c = 'testSales@apex.com', Billing_Communication_Preference__c = 'Email', Type = 'Transport Accident Commission');
+        insert acc;
+        return acc;
+    }
+    
     public static Opportunity createOpportunity(Id accountId) {
         Opportunity opp = new Opportunity(
             Name = 'Test Opportunity',
@@ -119,6 +155,33 @@ public with sharing class MC_TestDataFactory {
         insert cv;
         return cv;
     }
+    public static ContentVersion createContentVersionForDocumentTemplate(DocumentTemplate docTemplate) {
+    String title = docTemplate.Name;
+
+    ContentVersion cv = new ContentVersion(
+        Title = title,
+        PathOnClient = title + '.docx',
+        VersionData = Blob.valueOf('Test content'),
+        IsMajorVersion = true
+    );
+    insert cv;
+
+    cv = [
+        SELECT Id, ContentDocumentId, Title
+        FROM ContentVersion
+        WHERE Id = :cv.Id
+        LIMIT 1
+    ];
+
+    insert new ContentDocumentLink(
+        ContentDocumentId = cv.ContentDocumentId,
+        LinkedEntityId   = docTemplate.Id,
+        ShareType        = 'V',
+        Visibility       = 'AllUsers'
+    );
+
+    return cv;
+}
     public static List<tc9_pr__Payee_Leave_Event__c> createPayeeLeaveEvent(Integer numberOfPayeeLeaveEvent) {
         // For Creating Payee Leave Event records
 
@@ -274,10 +337,10 @@ public with sharing class MC_TestDataFactory {
         documentMappings.add(docMapping4);
         
         Document_Mappings__c docMapping5 = new Document_Mappings__c();
-        docMapping5.Document_Token__c = 'Date_of_Birth__c';
+        docMapping5.Document_Token__c = 'PersonBirthdate';
         docMapping5.Is_Parent_Object_Mapping__c = true;
         docMapping5.Is_Child_Object_Mapping__c = false;
-        docMapping5.Token_Value__c = 'Date_of_Birth__c';
+        docMapping5.Token_Value__c = 'PersonBirthdate';
         docMapping5.Document_Name__c = 'EnteralFeeding'; 
         docMapping5.Data_Type__c = 'Date';
         documentMappings.add(docMapping5);
@@ -309,9 +372,34 @@ public with sharing class MC_TestDataFactory {
         docMapping8.Data_Type__c = 'Text_Transform';
         documentMappings.add(docMapping8);
         
-         insert documentMappings;
+        Document_Mappings__c docMapping119 = new Document_Mappings__c();
+        docMapping119.Document_Token__c = 'Date__c';
+        docMapping119.Is_Parent_Object_Mapping__c = false;
+        docMapping119.Is_Child_Object_Mapping__c = true;
+        docMapping119.Token_Value__c = 'Date__c';
+        docMapping119.Document_Name__c = 'EnteralFeeding'; 
+        docMapping119.Data_Type__c = 'Date';
+        documentMappings.add(docMapping119);
         
-       
+        Document_Mappings__c docMapping120 = new Document_Mappings__c();
+        docMapping120.Document_Token__c = 'Time__c';
+        docMapping120.Is_Parent_Object_Mapping__c = false;
+        docMapping120.Is_Child_Object_Mapping__c = true;
+        docMapping120.Token_Value__c = 'Time__c';
+        docMapping120.Document_Name__c = 'EnteralFeeding'; 
+        docMapping120.Data_Type__c = 'Time';
+        documentMappings.add(docMapping120);
+        
+        Document_Mappings__c docMapping123 = new Document_Mappings__c();
+        docMapping123.Document_Token__c = 'Giving_Set_Changed_YES';
+        docMapping123.Is_Parent_Object_Mapping__c = false;
+        docMapping123.Is_Child_Object_Mapping__c = true;
+        docMapping123.Token_Value__c = 'Giving_Set_Changed__c';
+        docMapping123.Document_Name__c = 'EnteralFeeding'; 
+        docMapping123.Data_Type__c = 'Boolean';
+        documentMappings.add(docMapping123);
+        
+         insert documentMappings;
         //return documentMappings;
     }
     
@@ -354,14 +442,14 @@ public with sharing class MC_TestDataFactory {
         docMapping.Data_Type__c = 'Text';
         documentMappings.add(docMapping);
         
-        Document_Mappings__c docMapping9 = new Document_Mappings__c();
+        /*Document_Mappings__c docMapping9 = new Document_Mappings__c();
         docMapping9.Document_Token__c = 'Doctors_Details_Phone_No__c';
         docMapping9.Is_Parent_Object_Mapping__c = false;
         docMapping9.Is_Child_Object_Mapping__c = false;
         docMapping9.Token_Value__c = 'Doctors_Details_Phone_No__c';
         docMapping9.Document_Name__c = 'IndividualSupportPlan'; 
-        docMapping9.Data_Type__c = 'Phone';
-        documentMappings.add(docMapping9);
+        docMapping9.Data_Type__c = 'Number';
+        documentMappings.add(docMapping9);*/
 
 		Document_Mappings__c docMapping10 = new Document_Mappings__c();
         docMapping10.Document_Token__c = 'Identification_Date__c';
@@ -395,6 +483,36 @@ public with sharing class MC_TestDataFactory {
 		docMapping12.Is_Unrelated_Object_Mapping__c = true;
 		docMapping12.Unrelated_Object_Name__c = 'AllergyIntolerance';
         documentMappings.add(docMapping12);
+        
+        Document_Mappings__c docMapping124 = new Document_Mappings__c();
+        docMapping124.Document_Token__c = 'NoSelfCare_NO';
+        docMapping124.Is_Parent_Object_Mapping__c = false;
+        docMapping124.Is_Child_Object_Mapping__c = false;
+        docMapping124.Token_Value__c = 'NoSelfCare__c';
+        docMapping124.Document_Name__c = 'IndividualSupportPlan'; 
+        docMapping124.Data_Type__c = 'Boolean';
+		docMapping124.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping124);
+        
+        Document_Mappings__c docMapping125 = new Document_Mappings__c();
+        docMapping125.Document_Token__c = 'NoSelfCare_YES';
+        docMapping125.Is_Parent_Object_Mapping__c = false;
+        docMapping125.Is_Child_Object_Mapping__c = false;
+        docMapping125.Token_Value__c = 'NoSelfCare__c';
+        docMapping125.Document_Name__c = 'IndividualSupportPlan'; 
+        docMapping125.Data_Type__c = 'Boolean';
+		docMapping125.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping125);
+        
+        Document_Mappings__c docMapping126 = new Document_Mappings__c();
+        docMapping126.Document_Token__c = 'HoistRequired_NO';
+        docMapping126.Is_Parent_Object_Mapping__c = false;
+        docMapping126.Is_Child_Object_Mapping__c = false;
+        docMapping126.Token_Value__c = 'HoistRequired__c';
+        docMapping126.Document_Name__c = 'IndividualSupportPlan'; 
+        docMapping126.Data_Type__c = 'Boolean';
+		docMapping126.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping126);
 
         insert documentMappings;
         
@@ -423,16 +541,14 @@ public with sharing class MC_TestDataFactory {
         documentMappings.add(docMapping14);
         //Record Creation - 3
         Document_Mappings__c docMapping15 = new Document_Mappings__c();
-        docMapping15.Document_Token__c = 'Goal_Description__c';
+        docMapping15.Document_Token__c = 'Client_Acknowledgement__YES';
         docMapping15.Is_Parent_Object_Mapping__c = false;
-        docMapping15.Is_Child_Object_Mapping__c = true;
-        docMapping15.Token_Value__c = 'Goal_Description__c';
+        docMapping15.Is_Child_Object_Mapping__c = false;
+        docMapping15.Token_Value__c = 'Client_Acknowledgement__c';
         docMapping15.Document_Name__c = 'GoalDirectedCarePlan'; 
-        docMapping15.Data_Type__c = 'Text Area';
-        docMapping15.Child_Object_APiName__c = 'GDCP_Goal__c';
+        docMapping15.Data_Type__c = 'Boolean';
         documentMappings.add(docMapping15);
 		//Record Creation - 4
-		//
 		Document_Mappings__c docMapping16 = new Document_Mappings__c();
         docMapping16.Document_Token__c = 'Action_Description__c';
         docMapping16.Is_Parent_Object_Mapping__c = false;
@@ -460,7 +576,7 @@ public with sharing class MC_TestDataFactory {
         insert gdcpForm;
         return gdcpForm;
     }
-    public static GDCP_Goal__c createGoalRecord(Id gdcpId) {
+    /*public static GDCP_Goal__c createGoalRecord(Id gdcpId) {
         GDCP_Goal__c goalRecord = new GDCP_Goal__c();
         goalRecord.Goal_Description__c = 'Goal_Description__c';
         goalRecord.Goal_Directed_Care_Plan_Fom__c = gdcpId;
@@ -473,7 +589,8 @@ public with sharing class MC_TestDataFactory {
         actionRecord.Goal_Directed_Care_Plan_Fom__c = gdcpId;
         insert actionRecord;
         return actionRecord;
-    }
+    }*/
+    
     
     public static void createNextOfkin(Id accId) {
         Account accRecord = [Select Id,PersonContactId,RecordType.Name from Account where Id =: accId];
@@ -510,7 +627,6 @@ public with sharing class MC_TestDataFactory {
         echart.Formula_Type__c = 'Champagne';
         echart.Amount__c = '10.00';
         echart.Related_Account__c = accId;
-       // echart.Giving_Set_Changed__c = 'Yes';
         insert echart;
         return echart;
         
@@ -546,16 +662,17 @@ public with sharing class MC_TestDataFactory {
     Individual_Support_Plan__c  SupportPlan = new Individual_Support_Plan__c();
         SupportPlan.Related_Account__c = accId;
     	SupportPlan.Name_of_Doctor__c = 'Test Doctor';
+        SupportPlan.NoSelfCare__c = False;
     	SupportPlan.Doctors_Details_Phone_No__c = '9876543311';
     	insert SupportPlan;
     	return SupportPlan;
 }
-	// Fundting type != Agency Managed  & Funding Administrator = null
-    public static maica_cc__Invoice__c createInvoice(Id accId){
+    // Grampiance
+    public static maica_cc__Invoice__c createInvoiceGrampiance(Id accId, Id GrampId){
         maica_cc__Invoice__c invoiceToInsert = new maica_cc__Invoice__c();
                 invoiceToInsert.Account_Name__c = accId;
                 invoiceToInsert.maica_cc__Funding_Type__c = 'Self Managed';
-                invoiceToInsert.maica_cc__Funding_Administrator__c = null;
+                invoiceToInsert.maica_cc__Funding_Administrator__c = GrampId;
                 invoiceToInsert.Service_Ref__c = '';
                 invoiceToInsert.maica_cc__Invoice_Date__c = System.Today();
                 invoiceToInsert.BPAY_Reference_Number__c = '32323';
@@ -576,6 +693,86 @@ public with sharing class MC_TestDataFactory {
             return invoice;
     }
     
+    // Fundting type == Agency Managed
+    public static maica_cc__Invoice__c createAgencyManagedInvoice(Id accId){
+        maica_cc__Invoice__c invoiceToInsert = new maica_cc__Invoice__c();
+                invoiceToInsert.Account_Name__c = accId;
+                invoiceToInsert.maica_cc__Funding_Type__c = 'Agency Managed';
+                invoiceToInsert.maica_cc__Funding_Administrator__c = accId;
+                invoiceToInsert.Service_Ref__c = '';
+                invoiceToInsert.maica_cc__Invoice_Date__c = System.Today();
+                invoiceToInsert.BPAY_Reference_Number__c = '32323';
+                invoiceToInsert.maica_cc__Due_Date__c = System.Today() + 7;
+                invoiceToInsert.Invoice_Type__c = 'Standard Charges';
+            	invoiceToInsert.Dispatch_Date__c = Date.today();
+            insert invoiceToInsert;
+                   maica_cc__Invoice__c invoice = [
+                    SELECT Id, Invoice_Number__c, maica_cc__Funding_Type__c,BPAY_Reference_Number__c,Biller_Code__c,
+                   maica_cc__Invoice_Date__c,maica_cc__Funding_Administrator__c,Account_Name__r.Name,Account_Name__r.Opted_for_Direct_Debit__c,
+                   Invoice_Type__c,Account_Name__r.maica_cc__NDIS_Number__pc,Account_Name__r.BillingStreet,Account_Name__r.BillingCity, Account_Name__r.BillingState, Account_Name__r.BillingPostalCode,
+                   Account_Name__r.LastName,Account_Name__r.Unapplied_Payments__c,Payment_Terms_for_Doc1__c, Payment_Terms_for_Doc__c,Account_Name__r.Unapplied_Payment__c, Account_Name__r.Balance_Due__c, Account_Name__c,Total_Amount_Ex_GST__c,
+                   Account_Name__r.FirstName,Account_Name__r.Days_Overdue_1__c,Account_Name__r.Days_Overdue_2__c, Account_Name__r.Days_Overdue_3__c, Account_Name__r.Days_OverDue_4__c, maica_cc__Due_Date__c,maica_cc__Total_Amount__c,Total_GST__c,
+                   Account_Name__r.mecwacare_Client_ID__c
+                    FROM maica_cc__Invoice__c
+                    WHERE Id = :invoiceToInsert.Id
+        ];
+            return invoice;
+    }
+    
+	// Fundting type != Agency Managed  & Funding Administrator = null
+    public static maica_cc__Invoice__c createInvoice(Id accId){
+        maica_cc__Invoice__c invoiceToInsert = new maica_cc__Invoice__c();
+                invoiceToInsert.Account_Name__c = accId;
+                invoiceToInsert.maica_cc__Funding_Type__c = 'Self Managed';
+                invoiceToInsert.maica_cc__Funding_Administrator__c = accId;
+                invoiceToInsert.Service_Ref__c = '';
+                invoiceToInsert.maica_cc__Invoice_Date__c = System.Today();
+                invoiceToInsert.BPAY_Reference_Number__c = '32323';
+                invoiceToInsert.maica_cc__Due_Date__c = System.Today() + 7;
+                invoiceToInsert.Invoice_Type__c = 'Standard Charges';
+            	invoiceToInsert.Dispatch_Date__c = Date.today();
+            insert invoiceToInsert;
+                   maica_cc__Invoice__c invoice = [
+                    SELECT Id, Invoice_Number__c, maica_cc__Funding_Type__c,BPAY_Reference_Number__c,Biller_Code__c,
+                   maica_cc__Invoice_Date__c,maica_cc__Funding_Administrator__c,Account_Name__r.Name,Account_Name__r.Opted_for_Direct_Debit__c,
+                   Invoice_Type__c,Account_Name__r.maica_cc__NDIS_Number__pc,Account_Name__r.BillingStreet,Account_Name__r.BillingCity, Account_Name__r.BillingState, Account_Name__r.BillingPostalCode,
+                   Account_Name__r.LastName,Account_Name__r.Unapplied_Payments__c,Payment_Terms_for_Doc1__c, Payment_Terms_for_Doc__c,Account_Name__r.Unapplied_Payment__c, Account_Name__r.Balance_Due__c, Account_Name__c,Total_Amount_Ex_GST__c,
+                   Account_Name__r.FirstName,Account_Name__r.Days_Overdue_1__c,Account_Name__r.Days_Overdue_2__c, Account_Name__r.Days_Overdue_3__c, Account_Name__r.Days_OverDue_4__c, maica_cc__Due_Date__c,maica_cc__Total_Amount__c,Total_GST__c,
+                   Account_Name__r.mecwacare_Client_ID__c
+                    FROM maica_cc__Invoice__c
+                    WHERE Id = :invoiceToInsert.Id
+        ];
+            return invoice;
+    }
+    
+        public static maica_cc__Invoice_Line_Item__c createILIsah (Id invoiceId){
+        maica_cc__Support_Item__c supportItem = CreateSupportItem();
+        maica_cc__Invoice_Line_Item__c iliToInsert = new maica_cc__Invoice_Line_Item__c();
+
+        iliToInsert.maica_cc__Invoice__c = invoiceId;
+        iliToInsert.maica_cc__Quantity__c = 23;
+        iliToInsert.maica_cc__Unit_Price__c = 23;
+        iliToInsert.MC_Client_Contribution_Total__c = 100;
+        iliToInsert.maica_cc__Support_Item__c = supportItem.Id;
+        iliToInsert.Service_Detail_Description__c = 'Test Class for invoice SAH';
+        insert iliToInsert;
+        
+      // Now re-query with all required fields
+    maica_cc__Invoice_Line_Item__c ili = [
+        SELECT Id, Name,
+               maica_cc__Support_Item__c,
+               maica_cc__Support_Item__r.Name,
+               maica_cc__Amount__c,
+               maica_cc__Line_Total__c,
+               maica_cc__GST_Amount__c,
+               maica_cc__Quantity__c,MC_Client_Contribution_Total__c,MC_GST_Amount_for_SAH__c,Total_Amount_for_SAH__c,
+               maica_cc__Unit_Price__c,
+               Service_Detail_Description__c
+        FROM maica_cc__Invoice_Line_Item__c
+        WHERE Id = :iliToInsert.Id
+    ];
+    return ili;
+    }
     public static maica_cc__Invoice_Line_Item__c createILI (Id invoiceId){
         maica_cc__Support_Item__c supportItem = CreateSupportItem();
         maica_cc__Invoice_Line_Item__c iliToInsert = new maica_cc__Invoice_Line_Item__c();
@@ -1209,7 +1406,7 @@ public with sharing class MC_TestDataFactory {
     maica_cc__Invoice__c invoice = new maica_cc__Invoice__c(
         maica_cc__Participant__c = participantContactId,
         maica_cc__Funding_Administrator__c = fundingAdminId,
-        maica_cc__Funding_Type__c = 'Home Care Package',
+        maica_cc__Funding_Type__c = 'CHSP',
         maica_cc__Invoice_Date__c = System.today()
     );
 
@@ -1240,9 +1437,9 @@ public with sharing class MC_TestDataFactory {
 		Account acc = [SELECT Id, PersonContactId FROM Account WHERE Id = :accId LIMIT 1];
         serviceagreement.Name = 'Service Agreement';
            serviceagreement.maica_cc__Participant__c = acc.PersonContactId;
-           serviceagreement.maica_cc__Funding_Source__c = 'Home Care Package';
+           serviceagreement.maica_cc__Funding_Source__c = 'Block Funding';
         	serviceagreement.maica_cc__Price_List__c = priceList.Id;
-           serviceagreement.maica_cc__Funding_Type__c = 'Home Care Package';
+           serviceagreement.maica_cc__Funding_Type__c = '';
            serviceagreement.Opportunity_Owner_Email__c = 'test@test.com';
         serviceagreement.maica_cc__Service_Provider__c = acc.id;
         serviceagreement.maica_cc__Funding_Administrator__c = fundingAdminId;
@@ -1253,28 +1450,50 @@ public with sharing class MC_TestDataFactory {
            maica_cc__Service_Agreement__c = serviceagreement.Id,
            maica_cc__Start_Date__c = startDate,
            maica_cc__End_Date__c = endDate,
-           maica_cc__Funding_Type__c = 'Home Care Package'
+           maica_cc__Funding_Type__c = 'CHSP'
        );
        insert agRec;
         return serviceagreement;
     }
-    public static maica_cc__Service_Agreement_Statement__c statements(Id serviceagreement){
-       maica_cc__Service_Agreement_Statement__c statement = new maica_cc__Service_Agreement_Statement__c(
-           Dispatch_Date__c = Date.newInstance(2000, 12, 12),
-           Dispatch_Status__c = 'Document Generated',
-           maica_cc__Service_Agreement__c = serviceagreement,
-           maica_cc__Period_Start_Date__c = System.today()
-       );
-       insert statement;
-        return statement;
-    } 
-        public static Service_Agreement_Statement_Line_Item__c sli(Id Statement){
-            Service_Agreement_Statement_Line_Item__c sline = new Service_Agreement_Statement_Line_Item__c(
-           Service_Agreement_Statement__c = statement
-            );
-       insert sline;
-    return sline;
+    
+        public static maica_cc__Service_Agreement_Statement__c statements(Id serviceagreement){
+           maica_cc__Service_Agreement_Statement__c statement = new maica_cc__Service_Agreement_Statement__c(
+               Dispatch_Date__c = Date.newInstance(2000, 12, 12),
+               Dispatch_Status__c = 'Document Generated',
+               maica_cc__Service_Agreement__c = serviceagreement,
+               maica_cc__Period_Start_Date__c = System.today()
+           );
+           insert statement;
+            return statement;
+        } 
+            public static Service_Agreement_Statement_Line_Item__c sli(Id Statement){
+                Service_Agreement_Statement_Line_Item__c sline = new Service_Agreement_Statement_Line_Item__c(
+               Service_Agreement_Statement__c = statement
+                );
+           insert sline;
+        return sline;
+        }
+        public static maica_cc__Payment__c createPaidPayment(Id invoiceId) {
+        maica_cc__Payment__c p = new maica_cc__Payment__c(
+            maica_cc__Invoice__c = invoiceId,
+            Payment_Status__c = 'Paid',
+            maica_cc__Payment_Amount__c = 50,
+            maica_cc__Payment_Date__c = Date.today()
+        );
+        insert p;
+        return p;
     }
+
+        public static Mecwa_ExceptionLog__c createStatementException(Id invoiceId, Id sasId, String errorType) {
+            Mecwa_ExceptionLog__c log = new Mecwa_ExceptionLog__c(
+                Invoice_Record_Id__c = invoiceId,
+                Statement_Record_Id__c = sasId,
+                Error_Type__c = errorType,
+                Exception_Message__c = 'Test error'
+            );
+            insert log;
+            return log;
+        }
     
         
     public static void createDocumentMappings7(){
@@ -1388,7 +1607,7 @@ public with sharing class MC_TestDataFactory {
         docMapping111.Data_Type__c = 'Text';
         documentMappings.add(docMapping111);
         
-                        Document_Mappings__c docMapping112 = new Document_Mappings__c();
+        Document_Mappings__c docMapping112 = new Document_Mappings__c();
         docMapping112.Document_Token__c = 'BillingPostalCode';
         docMapping112.Is_Parent_Object_Mapping__c = true;
         docMapping112.Is_Child_Object_Mapping__c = false;
@@ -1397,7 +1616,7 @@ public with sharing class MC_TestDataFactory {
         docMapping112.Data_Type__c = 'Text';
         documentMappings.add(docMapping112);
         
-                        Document_Mappings__c docMapping113 = new Document_Mappings__c();
+        Document_Mappings__c docMapping113 = new Document_Mappings__c();
         docMapping113.Document_Token__c = 'BillingState';
         docMapping113.Is_Parent_Object_Mapping__c = true;
         docMapping113.Is_Child_Object_Mapping__c = false;
@@ -1406,7 +1625,7 @@ public with sharing class MC_TestDataFactory {
         docMapping113.Data_Type__c = 'Text';
         documentMappings.add(docMapping113);
         
-                        Document_Mappings__c docMapping114 = new Document_Mappings__c();
+        Document_Mappings__c docMapping114 = new Document_Mappings__c();
         docMapping114.Document_Token__c = 'BillingCity';
         docMapping114.Is_Parent_Object_Mapping__c = true;
         docMapping114.Is_Child_Object_Mapping__c = false;
@@ -1425,5 +1644,171 @@ public with sharing class MC_TestDataFactory {
         exceptionlog.Error_Message__c = 'Failed to Generate Document';
        	exceptionlog.Error_Type__c = 'Document';
         insert exceptionlog;
+    }
+     public static void createDocumentMappings8() {
+        List<Document_Mappings__c> documentMappings = new List<Document_Mappings__c>();
+        //Record Creation - 1
+        Document_Mappings__c docMapping115 = new Document_Mappings__c();
+        docMapping115.Document_Token__c = 'Assessment_People_present__c';
+        docMapping115.Is_Parent_Object_Mapping__c = false;
+        docMapping115.Is_Child_Object_Mapping__c = false;
+        docMapping115.Token_Value__c = 'Assessment_People_present__c';
+        docMapping115.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping115.Data_Type__c = 'Text Area';
+        documentMappings.add(docMapping115);
+		
+        //Record Creation - 2
+        Document_Mappings__c docMapping116 = new Document_Mappings__c();
+        docMapping116.Document_Token__c = 'Assessment_Referral_details__c';
+        docMapping116.Is_Parent_Object_Mapping__c = false;
+        docMapping116.Is_Child_Object_Mapping__c = false;
+        docMapping116.Token_Value__c = 'Assessment_Referral_details__c';
+        docMapping116.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping116.Data_Type__c = 'Text Area';
+        documentMappings.add(docMapping116);
+        //Record Creation - 3
+        Document_Mappings__c docMapping117 = new Document_Mappings__c();
+        docMapping117.Document_Token__c = 'Name';
+        docMapping117.Is_Parent_Object_Mapping__c = true;
+        docMapping117.Is_Child_Object_Mapping__c = false;
+        docMapping117.Token_Value__c = 'Name';
+        docMapping117.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping117.Data_Type__c = 'Text';
+        documentMappings.add(docMapping117);
+		//Record Creation - 4
+		Document_Mappings__c docMapping118 = new Document_Mappings__c();
+        docMapping118.Document_Token__c = 'Clinical_treatment_provided__c';
+        docMapping118.Is_Parent_Object_Mapping__c = false;
+        docMapping118.Is_Child_Object_Mapping__c = false;
+        docMapping118.Token_Value__c = 'Clinical_treatment_provided__c';
+        docMapping118.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping118.Data_Type__c = 'Picklist';
+		docMapping118.Is_Unrelated_Object_Mapping__c = true;
+        docMapping118.Unrelated_Object_Name__c = 'Medical_Conditions__c';
+        documentMappings.add(docMapping118);
+         
+        Document_Mappings__c docMapping121 = new Document_Mappings__c();
+        docMapping121.Document_Token__c = 'Living_situation__c';
+        docMapping121.Is_Parent_Object_Mapping__c = false;
+        docMapping121.Is_Child_Object_Mapping__c = false;
+        docMapping121.Token_Value__c = 'Living_situation__c';
+        docMapping121.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping121.Data_Type__c = 'Picklist (Multi-Select)';
+		docMapping121.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping121);     
+		
+		Document_Mappings__c docMapping122 = new Document_Mappings__c();
+        docMapping122.Document_Token__c = 'Vision_Aids__c';
+        docMapping122.Is_Parent_Object_Mapping__c = false;
+        docMapping122.Is_Child_Object_Mapping__c = false;
+        docMapping122.Token_Value__c = 'Vision_Aids__c';
+        docMapping122.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping122.Data_Type__c = 'Checkbox';
+		docMapping122.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping122);   
+         
+         Document_Mappings__c docMapping129 = new Document_Mappings__c();
+        docMapping129.Document_Token__c = 'Report_Date__c';
+        docMapping129.Is_Parent_Object_Mapping__c = false;
+        docMapping129.Is_Child_Object_Mapping__c = false;
+        docMapping129.Token_Value__c = 'Report_Date__c';
+        docMapping129.Document_Name__c = 'OTInitialAssessmentForm'; 
+        docMapping129.Data_Type__c = 'Date';
+		docMapping129.Is_Unrelated_Object_Mapping__c = false;
+        documentMappings.add(docMapping129);
+         
+        insert documentMappings;
+    }
+	
+	public static OT_Initial_Assessment_Form__c createOTIAFormData(Id accId) {
+    OT_Initial_Assessment_Form__c  OTIAForm = new OT_Initial_Assessment_Form__c();
+        OTIAForm.Related_Account__c = accId;
+    	OTIAForm.Assessment_People_present__c = 'Test';
+		OTIAForm.Assessment_Referral_details__c = 'Test';
+        OTIAForm.Report_Date__c = Date.today();
+    	insert OTIAForm;
+    	return OTIAForm;
+}
+    	public static Medical_Conditions__c createMedicalConditionsData(Id accId) {
+    	Medical_Conditions__c  MDRecords = new Medical_Conditions__c();
+        MDRecords.Account__c = accId;
+    	MDRecords.Medical_Conditions_Disabilities_Name__c = 'Cardiac condition';
+		MDRecords.Clinical_treatment_provided__c = 'Bowel care';
+		MDRecords.Notes_Comments__c = 'Test';
+    	insert MDRecords;
+    	return MDRecords;
+}
+     public static void createDocumentMappings9() {
+        List<Document_Mappings__c> documentMappings = new List<Document_Mappings__c>();
+        //Record Creation - 1
+        Document_Mappings__c docMapping127 = new Document_Mappings__c();
+        docMapping127.Document_Token__c = 'IF_Hazardreduced';
+        docMapping127.Is_Parent_Object_Mapping__c = false;
+        docMapping127.Is_Child_Object_Mapping__c = false;
+        docMapping127.Token_Value__c = 'Hazard_reduced__c';
+        docMapping127.Document_Name__c = 'HazardReport'; 
+        docMapping127.Data_Type__c = 'Boolean_Transform';
+        documentMappings.add(docMapping127);
+		
+        //Record Creation - 2
+        Document_Mappings__c docMapping128 = new Document_Mappings__c();
+        docMapping128.Document_Token__c = 'Immediate_Threat__c';
+        docMapping128.Is_Parent_Object_Mapping__c = false;
+        docMapping128.Is_Child_Object_Mapping__c = false;
+        docMapping128.Token_Value__c = 'Immediate_Threat__c';
+        docMapping128.Document_Name__c = 'HazardReport'; 
+        docMapping128.Data_Type__c = 'Picklist';
+        documentMappings.add(docMapping128);
+ 
+    }
+    	public static Hazard_Report__c createHazardReportData(Id accId) {
+    	Hazard_Report__c  HazardReportForm = new Hazard_Report__c();
+        HazardReportForm.Related_Account__c = accId;
+    	HazardReportForm.Immediate_Threat__c = 'No';
+		HazardReportForm.Hazard_reduced__c = 'No';
+    	insert HazardReportForm;
+    	return HazardReportForm;
+}
+     public static void createDocumentMappings10() {
+        List<Document_Mappings__c> documentMappings = new List<Document_Mappings__c>();
+        //Record Creation - 1
+        Document_Mappings__c docMapping130 = new Document_Mappings__c();
+        docMapping130.Document_Token__c = 'Breakthrough_Medication__c';
+        docMapping130.Is_Parent_Object_Mapping__c = false;
+        docMapping130.Is_Child_Object_Mapping__c = false;
+        docMapping130.Token_Value__c = 'Breakthrough_Medication__c';
+        docMapping130.Document_Name__c = 'PainDiary'; 
+        docMapping130.Data_Type__c = 'Text';
+        documentMappings.add(docMapping130);
+		
+        //Record Creation - 2
+        Document_Mappings__c docMapping131 = new Document_Mappings__c();
+        docMapping131.Document_Token__c = 'Date_Time__c';
+        docMapping131.Is_Parent_Object_Mapping__c = false;
+        docMapping131.Is_Child_Object_Mapping__c = true;
+        docMapping131.Token_Value__c = 'Date_Time__c';
+        docMapping131.Document_Name__c = 'PainDiary'; 
+        docMapping131.Data_Type__c = 'Date/Time';
+        documentMappings.add(docMapping131);
+ 
+    }
+
+	
+	public static Pain_Diary__c createPainDiarytData(Id accId) {
+    Pain_Diary__c  PainDiaryForm = new Pain_Diary__c();
+        PainDiaryForm.Related_Account__c = accId;
+		PainDiaryForm.Breakthrough_Medication__c = 'Yes';
+    	insert PainDiaryForm;
+        system.debug('PainDiaryForm' +PainDiaryForm);
+    	return PainDiaryForm;
+}
+    public static Pain_Diary_Record__c createPainDiaryRecord(Id PainDiaryId){
+        Pain_Diary_Record__c pdRecord = new Pain_Diary_Record__c();
+        pdRecord.Date_Time__c = system.now();
+        pdRecord.Pain_Diary__c = PainDiaryId;
+        insert pdRecord;
+                system.debug('pdRecord' +pdRecord);
+
+        return pdRecord;        
     }
 }
