@@ -1,0 +1,490 @@
+@isTest
+private class MedicalConditionsMobileCtrlTest {
+
+    private static final String OBJ_ACCOUNT         = 'Account';
+    private static final String LOOKUP_PARENT       = 'ParentId';
+    private static final String MIN_USERNAME_PREFIX = 'mcmedtest.min.';
+
+    // ------------------------------------------------------------------
+    // Setup: user only (setup object) to avoid MIXED_DML_OPERATION
+    // ------------------------------------------------------------------
+    @TestSetup
+    static void setupUsers() {
+        List<Profile> minProfiles = [SELECT Id FROM Profile WHERE Name = 'Minimum Access - Salesforce' LIMIT 1];
+        if (minProfiles.isEmpty()) {
+            return;
+        }
+        insert new User(
+            FirstName         = 'Medical',
+            LastName          = 'TestUser',
+            Alias             = 'medmin',
+            Email             = 'medtest@mc-test.example.com',
+            Username          = MIN_USERNAME_PREFIX + Datetime.now().getTime() + '@mc-test.example.com',
+            ProfileId         = minProfiles[0].Id,
+            TimeZoneSidKey    = 'Australia/Perth',
+            LocaleSidKey      = 'en_AU',
+            EmailEncodingKey  = 'UTF-8',
+            LanguageLocaleKey = 'en_US'
+        );
+    }
+
+    private static User getMinAccessUser() {
+        String pattern = MIN_USERNAME_PREFIX + '%';
+        List<User> users = [SELECT Id FROM User WHERE Username LIKE :pattern LIMIT 1];
+        return users.isEmpty() ? null : users[0];
+    }
+
+    // ------------------------------------------------------------------
+    // Data helpers. Account/ParentId is used as the generic parent-child
+    // pair: Account always has RecordTypeId, RecordType.Name and a
+    // filterable lookup, which the controller's queries rely on.
+    // ------------------------------------------------------------------
+    private static Account createParent() {
+        return MC_TestDataFactory.grampiansAccountEmail();
+    }
+
+    private static List<Account> createChildren(Account parent, Integer count) {
+        List<Account> children = new List<Account>();
+        for (Integer i = 0; i < count; i++) {
+            Account child = parent.clone(false, true, false, false);
+            child.Name     = 'Child Account ' + i;
+            child.ParentId = parent.Id;
+            children.add(child);
+        }
+        insert children;
+        return children;
+    }
+
+    private static RecordType getRecordType(Id recordTypeId) {
+        return [SELECT Id, DeveloperName FROM RecordType WHERE Id = :recordTypeId];
+    }
+
+    private static RecordType getOtherAccountRecordType(Id excludedId) {
+        List<RecordType> rts = [
+            SELECT Id, DeveloperName FROM RecordType
+            WHERE SObjectType = 'Account' AND Id != :excludedId
+            LIMIT 1
+        ];
+        return rts.isEmpty() ? null : rts[0];
+    }
+
+    private static void assertMessage(MedicalConditionsMobileCtrl.RelatedListResult res, String fragment) {
+        Assert.isNotNull(res, 'Result should never be null');
+        Assert.isNotNull(res.message, 'A message should explain why nothing was returned');
+        Assert.isTrue(res.message.contains(fragment), 'Unexpected message: ' + res.message);
+        Assert.areEqual(0, res.records.size(), 'No records should be returned when a message is set');
+        Assert.areEqual(0, res.totalCount, 'Total count should be 0 when a message is set');
+    }
+
+    // ==================================================================
+    // getRecordTypeIdByDeveloperName
+    // ==================================================================
+    @isTest
+    static void testGetRecordTypeId_BlankArguments_ReturnsNull() {
+        Assert.isNull(MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName(null, 'X'), 'Null object should return null');
+        Assert.isNull(MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName('', 'X'), 'Blank object should return null');
+        Assert.isNull(MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName(OBJ_ACCOUNT, null), 'Null developer name should return null');
+        Assert.isNull(MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName(OBJ_ACCOUNT, ' '), 'Blank developer name should return null');
+    }
+
+    @isTest
+    static void testGetRecordTypeId_Found_ReturnsId() {
+        Account parent = createParent();
+        RecordType rt = getRecordType(parent.RecordTypeId);
+
+        Id result = MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName(OBJ_ACCOUNT, rt.DeveloperName);
+        Assert.areEqual(rt.Id, result, 'Should return the Record Type Id');
+    }
+
+    @isTest
+    static void testGetRecordTypeId_NotFound_ReturnsNull() {
+        Assert.isNull(
+            MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName(OBJ_ACCOUNT, 'MC_No_Such_RT'),
+            'Unknown developer name should be swallowed and return null');
+        Assert.isNull(
+            MedicalConditionsMobileCtrl.getRecordTypeIdByDeveloperName('Bogus__c', 'MC_No_Such_RT'),
+            'Unknown object should be swallowed and return null');
+    }
+
+    // ==================================================================
+    // getChildren
+    // ==================================================================
+    @isTest
+    static void testGetChildren_InvalidArguments_ReturnsEmpty() {
+        Account parent = createParent();
+        Assert.isTrue(MedicalConditionsMobileCtrl.getChildren(null, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, null, null).isEmpty(),
+            'Null parentId should return an empty list');
+        Assert.isTrue(MedicalConditionsMobileCtrl.getChildren(parent.Id, '', LOOKUP_PARENT, null, null, null, null).isEmpty(),
+            'Blank object should return an empty list');
+        Assert.isTrue(MedicalConditionsMobileCtrl.getChildren(parent.Id, OBJ_ACCOUNT, null, null, null, null, null).isEmpty(),
+            'Blank lookup should return an empty list');
+    }
+
+    @isTest
+    static void testGetChildren_ReturnsChildren() {
+        Account parent = createParent();
+        createChildren(parent, 2);
+
+        List<SObject> rows = MedicalConditionsMobileCtrl.getChildren(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, new List<String>{ 'Phone' }, null, null, 1);
+        Assert.areEqual(2, rows.size(), 'Both children should be returned');
+        for (SObject row : rows) {
+            Assert.areEqual(parent.RecordTypeId, (Id) row.get('RecordTypeId'), 'RecordTypeId should be selected by default');
+        }
+    }
+
+    @isTest
+    static void testGetChildren_NullFieldList_StillReturnsDefaults() {
+        Account parent = createParent();
+        createChildren(parent, 1);
+
+        List<SObject> rows = MedicalConditionsMobileCtrl.getChildren(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, 0, null);
+        Assert.areEqual(1, rows.size(), 'A null field list should fall back to the default fields');
+    }
+
+    @isTest
+    static void testGetChildren_WithLimit() {
+        Account parent = createParent();
+        createChildren(parent, 3);
+
+        List<SObject> rows = MedicalConditionsMobileCtrl.getChildren(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, 1, null);
+        Assert.areEqual(1, rows.size(), 'limitSize should cap the results');
+    }
+
+    @isTest
+    static void testGetChildren_WithRecordTypeFilter() {
+        Account parent = createParent();
+        createChildren(parent, 2);
+
+        List<SObject> matching = MedicalConditionsMobileCtrl.getChildren(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, parent.RecordTypeId, null, null);
+        Assert.areEqual(2, matching.size(), 'Children with the matching Record Type should be returned');
+
+        RecordType other = getOtherAccountRecordType(parent.RecordTypeId);
+        if (other != null) {
+            List<SObject> none = MedicalConditionsMobileCtrl.getChildren(
+                parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, other.Id, null, null);
+            Assert.isTrue(none.isEmpty(), 'Children with a different Record Type should be excluded');
+        }
+    }
+
+    // ==================================================================
+    // countChildren
+    // ==================================================================
+    @isTest
+    static void testCountChildren_InvalidArguments_ReturnsZero() {
+        Account parent = createParent();
+        Assert.areEqual(0, MedicalConditionsMobileCtrl.countChildren(null, OBJ_ACCOUNT, LOOKUP_PARENT, null), 'Null parentId should return 0');
+        Assert.areEqual(0, MedicalConditionsMobileCtrl.countChildren(parent.Id, '', LOOKUP_PARENT, null), 'Blank object should return 0');
+        Assert.areEqual(0, MedicalConditionsMobileCtrl.countChildren(parent.Id, OBJ_ACCOUNT, '', null), 'Blank lookup should return 0');
+    }
+
+    @isTest
+    static void testCountChildren_CountsWithAndWithoutRecordType() {
+        Account parent = createParent();
+        createChildren(parent, 3);
+
+        Assert.areEqual(3, MedicalConditionsMobileCtrl.countChildren(parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null),
+            'All children should be counted without a Record Type filter');
+        Assert.areEqual(3, MedicalConditionsMobileCtrl.countChildren(parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, parent.RecordTypeId),
+            'Children with the matching Record Type should be counted');
+
+        RecordType other = getOtherAccountRecordType(parent.RecordTypeId);
+        if (other != null) {
+            Assert.areEqual(0, MedicalConditionsMobileCtrl.countChildren(parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, other.Id),
+                'Children with a different Record Type should not be counted');
+        }
+    }
+
+    // ==================================================================
+    // getRelatedList: parent Id handling (toId)
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_InvalidParentIds_ReturnMessage() {
+        List<String> badIds = new List<String>{ null, '', '   ', '{!recordId}', 'not-an-id' };
+        for (String badId : badIds) {
+            MedicalConditionsMobileCtrl.RelatedListResult res =
+                MedicalConditionsMobileCtrl.getRelatedList(badId, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, null);
+            assertMessage(res, 'did not receive a record Id');
+            Assert.isFalse(res.accessible, 'Result should not be marked accessible for a bad Id: ' + badId);
+        }
+    }
+
+    @isTest
+    static void testGetRelatedList_ParentIdWithWhitespace_IsTrimmed() {
+        Account parent = createParent();
+        createChildren(parent, 1);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            ' ' + parent.Id + ' ', OBJ_ACCOUNT, LOOKUP_PARENT, null, null, null);
+        Assert.isNull(res.message, 'A padded but valid Id should work');
+        Assert.areEqual(1, res.totalCount, 'Child should be found');
+    }
+
+    // ==================================================================
+    // getRelatedList: object / access / lookup validation
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_UnknownOrBlankObject_ReturnsMessage() {
+        Account parent = createParent();
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, 'Bogus__c', LOOKUP_PARENT, null, null, null),
+            'does not exist in this org');
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, null, LOOKUP_PARENT, null, null, null),
+            'does not exist in this org');
+    }
+
+    @isTest
+    static void testGetRelatedList_ObjectAndLookupCasingIsTolerated() {
+        Account parent = createParent();
+        createChildren(parent, 1);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, 'ACCOUNT', 'PARENTID', null, null, null);
+        Assert.isNull(res.message, 'Object and field names should be matched case-insensitively');
+        Assert.areEqual(1, res.totalCount, 'Child should be found');
+    }
+
+    @isTest
+    static void testGetRelatedList_UserWithoutObjectAccess_ReturnsMessage() {
+        Account parent = createParent();
+        User minUser = getMinAccessUser();
+        if (minUser == null) {
+            return; // 'Minimum Access - Salesforce' profile not available in this org
+        }
+
+        MedicalConditionsMobileCtrl.RelatedListResult res;
+        System.runAs(minUser) {
+            res = MedicalConditionsMobileCtrl.getRelatedList(parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, null);
+        }
+        assertMessage(res, 'do not have read access');
+        Assert.isFalse(res.accessible, 'Result should not be accessible');
+        Assert.isNotNull(res.objectLabel, 'Object label should still be populated');
+    }
+
+    @isTest
+    static void testGetRelatedList_InvalidLookup_ReturnsMessage() {
+        Account parent = createParent();
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, OBJ_ACCOUNT, 'Nope__c', null, null, null),
+            'Lookup field');
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, OBJ_ACCOUNT, null, null, null, null),
+            'Lookup field');
+    }
+
+    @isTest
+    static void testGetRelatedList_NonFilterableLookup_ReturnsMessage() {
+        Account parent = createParent();
+        // Description is a long text area, which cannot be used in a WHERE clause
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, OBJ_ACCOUNT, 'Description', null, null, null),
+            'cannot be filtered on');
+    }
+
+    // ==================================================================
+    // getRelatedList: record type handling
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_RecordTypeNotFound_ReturnsMessage() {
+        Account parent = createParent();
+        assertMessage(
+            MedicalConditionsMobileCtrl.getRelatedList(parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, 'MC_No_Such_RT', null),
+            'was not found');
+    }
+
+    @isTest
+    static void testGetRelatedList_BlankRecordTypeName_DoesNotFilter() {
+        Account parent = createParent();
+        createChildren(parent, 2);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, '   ', null);
+        Assert.isNull(res.message, 'A blank Record Type is a valid setup');
+        Assert.isNull(res.recordTypeId, 'No Record Type Id should be resolved');
+        Assert.areEqual(2, res.totalCount, 'All children should be counted');
+    }
+
+    @isTest
+    static void testGetRelatedList_RecordTypeFilter_MatchingAndNonMatching() {
+        Account parent = createParent();
+        createChildren(parent, 2);
+        RecordType matching = getRecordType(parent.RecordTypeId);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, matching.DeveloperName, null);
+        Assert.areEqual(matching.Id, res.recordTypeId, 'Record Type Id should be resolved from the developer name');
+        Assert.areEqual(2, res.totalCount, 'Matching Record Type children should be counted');
+        Assert.areEqual(2, res.records.size(), 'Matching Record Type children should be returned');
+
+        RecordType other = getOtherAccountRecordType(parent.RecordTypeId);
+        if (other != null) {
+            MedicalConditionsMobileCtrl.RelatedListResult resOther = MedicalConditionsMobileCtrl.getRelatedList(
+                parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, other.DeveloperName, null);
+            Assert.areEqual(other.Id, resOther.recordTypeId, 'Record Type Id should be resolved');
+            Assert.areEqual(0, resOther.totalCount, 'Other Record Type should exclude the children');
+            Assert.areEqual(0, resOther.records.size(), 'Other Record Type should return no rows');
+        }
+    }
+
+    // ==================================================================
+    // getRelatedList: results, limits and flags
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_ReturnsChildrenAndFlags() {
+        Account parent = createParent();
+        createChildren(parent, 2);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, new List<String>{ 'Name', 'Phone' }, null, 10);
+
+        Assert.isNull(res.message, 'No message expected on success');
+        Assert.isTrue(res.accessible, 'Object should be accessible');
+        Assert.isNotNull(res.createable, 'createable flag should be set');
+        Assert.isNotNull(res.updateable, 'updateable flag should be set');
+        Assert.isNotNull(res.objectLabel, 'Object label should be set');
+        Assert.areEqual(2, res.totalCount, 'Total count should include both children');
+        Assert.areEqual(2, res.records.size(), 'Both children should be returned');
+        Assert.areEqual('Id', res.fields[0], 'Id should always be the first selected field');
+        Assert.isTrue(res.fields.contains('Phone'), 'Requested field should be selected');
+        Assert.isTrue(res.fields.contains('RecordTypeId'), 'RecordTypeId should be added when it exists');
+        Assert.isTrue(res.fields.contains('RecordType.Name'), 'RecordType.Name should be added when it exists');
+        Assert.areEqual(new Set<String>(res.fields).size(), res.fields.size(), 'Selected fields should not contain duplicates');
+        Assert.isTrue(res.skippedFields.isEmpty(), 'Nothing should be skipped');
+        Assert.isTrue(res.records[0].containsKey('Name'), 'Rows should be keyed by field path');
+    }
+
+    @isTest
+    static void testGetRelatedList_LimitCapsRecordsButNotTotalCount() {
+        Account parent = createParent();
+        createChildren(parent, 3);
+
+        MedicalConditionsMobileCtrl.RelatedListResult limited = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, 1);
+        Assert.areEqual(1, limited.records.size(), 'Limit should cap the rows');
+        Assert.areEqual(3, limited.totalCount, 'Total count should ignore the limit');
+
+        MedicalConditionsMobileCtrl.RelatedListResult zero = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, 0);
+        Assert.areEqual(3, zero.records.size(), 'A limit of 0 should mean no limit');
+
+        MedicalConditionsMobileCtrl.RelatedListResult unlimited = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, null, null, null);
+        Assert.areEqual(3, unlimited.records.size(), 'A null limit should mean no limit');
+    }
+
+    @isTest
+    static void testGetRelatedList_MultipleChildren() {
+        Account parent = createParent();
+        createChildren(parent, 25);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, new List<String>{ 'Name' }, null, null);
+        Assert.areEqual(25, res.totalCount, 'All children should be counted');
+        Assert.areEqual(25, res.records.size(), 'All children should be returned');
+    }
+
+    // ==================================================================
+    // getRelatedList: field planning and flattening
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_FieldPlanning_SkipsInvalidAndDedupes() {
+        Account parent = createParent();
+        createChildren(parent, 1);
+
+        List<String> requested = new List<String>{
+            'Name', 'name',           // duplicate, different casing
+            'Bogus__c',               // unknown field
+            '', '   ', null,          // blanks are ignored, not reported
+            'Bogus.Name',             // unknown relationship
+            '.Name',                  // blank path segment
+            'Name.Name',              // not a relationship
+            'Parent.',                // relationship without a field
+            'Parent.Name'             // valid relationship path
+        };
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            parent.Id, OBJ_ACCOUNT, LOOKUP_PARENT, requested, null, null);
+
+        Assert.isNull(res.message, 'Bad field names should be skipped, not fail the query');
+        Assert.areEqual(5, res.skippedFields.size(), 'Only unresolvable paths should be skipped: ' + res.skippedFields);
+        Assert.isTrue(res.skippedFields.contains('Bogus__c'), 'Unknown field should be reported');
+        Assert.isTrue(res.skippedFields.contains('Bogus.Name'), 'Unknown relationship should be reported');
+        Assert.isTrue(res.skippedFields.contains('.Name'), 'Blank segment should be reported');
+        Assert.isTrue(res.skippedFields.contains('Name.Name'), 'Non-relationship path should be reported');
+        Assert.isTrue(res.skippedFields.contains('Parent.'), 'Dangling relationship should be reported');
+        Assert.isTrue(res.fields.contains('Parent.Name'), 'Valid relationship path should be selected');
+        Assert.areEqual(new Set<String>(res.fields).size(), res.fields.size(), 'Selected fields should not contain duplicates');
+
+        Map<String, Object> row = res.records[0];
+        Assert.areEqual(parent.Name, (String) row.get('Parent_Name'), 'Relationship paths should be flattened with underscores');
+    }
+
+    @isTest
+    static void testGetRelatedList_Flatten_NullRelationshipYieldsNull() {
+        Account parent = createParent();
+        List<Account> children = createChildren(parent, 1);
+
+        // Filtering by owner returns the parent too, which has no Parent account
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            UserInfo.getUserId(), OBJ_ACCOUNT, 'OwnerId', new List<String>{ 'Parent.Name' }, null, null);
+
+        Assert.isNull(res.message, 'Owner lookup should be valid');
+        Boolean foundParent = false;
+        Boolean foundChild = false;
+        for (Map<String, Object> row : res.records) {
+            Assert.isTrue(row.containsKey('Parent_Name'), 'Every row should have the flattened key');
+            if ((Id) row.get('Id') == parent.Id) {
+                foundParent = true;
+                Assert.isNull(row.get('Parent_Name'), 'A record without a parent should flatten to null');
+            } else if ((Id) row.get('Id') == children[0].Id) {
+                foundChild = true;
+                Assert.areEqual(parent.Name, (String) row.get('Parent_Name'), 'Child should carry the parent name');
+            }
+        }
+        Assert.isTrue(foundParent && foundChild, 'Both the parent and child should be listed');
+    }
+
+    @isTest
+    static void testGetRelatedList_ObjectWithoutRecordTypes_OmitsRecordTypeFields() {
+        // User has no RecordTypeId, so RecordTypeId / RecordType.Name must not be selected
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            UserInfo.getUserId(), 'User', 'ManagerId', new List<String>{ 'Username' }, null, 5);
+
+        Assert.isNull(res.message, 'User/ManagerId should be a valid combination');
+        Assert.isTrue(res.accessible, 'User should be accessible');
+        Assert.isFalse(res.fields.contains('RecordTypeId'), 'RecordTypeId should be omitted when the object has none');
+        Assert.isFalse(res.fields.contains('RecordType.Name'), 'RecordType.Name should be omitted when the object has none');
+    }
+
+    // ==================================================================
+    // getRelatedList: real Medical_Conditions__c usage
+    // ==================================================================
+    @isTest
+    static void testGetRelatedList_MedicalConditions_ReturnsRecord() {
+        Account acc = MC_TestDataFactory.createPersonAccount();
+        MC_TestDataFactory.createMedicalConditionsData(acc.Id);
+
+        MedicalConditionsMobileCtrl.RelatedListResult res = MedicalConditionsMobileCtrl.getRelatedList(
+            acc.Id,
+            'Medical_Conditions__c',
+            'Account__c',
+            new List<String>{
+                'Medical_Conditions_Disabilities_Name__c',
+                'Clinical_treatment_provided__c',
+                'Notes_Comments__c'
+            },
+            null,
+            10);
+
+        Assert.isNull(res.message, 'Medical conditions should load without a message');
+        Assert.isTrue(res.accessible, 'Medical_Conditions__c should be accessible');
+        Assert.areEqual(1, res.totalCount, 'One medical condition was created');
+        Assert.areEqual(1, res.records.size(), 'One medical condition should be returned');
+        Assert.isTrue(res.skippedFields.isEmpty(), 'All configured fields should resolve: ' + res.skippedFields);
+        Assert.areEqual('Cardiac condition', (String) res.records[0].get('Medical_Conditions_Disabilities_Name__c'),
+            'Field value should be flattened into the row');
+    }
+}
