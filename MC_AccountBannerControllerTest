@@ -113,6 +113,13 @@ private class MC_AccountBannerControllerTest {
     private static Account getFundingAdmin() {
         if (fundingAdmin == null) {
             fundingAdmin = MC_TestDataFactory.grampiansAccountEmail();
+            // Validation rule: Funding Administrator must have a Billing Address
+            fundingAdmin.BillingStreet     = '1 Test Street';
+            fundingAdmin.BillingCity       = 'Melbourne';
+            fundingAdmin.BillingState      = 'Victoria';
+            fundingAdmin.BillingPostalCode = '3000';
+            fundingAdmin.BillingCountry    = 'Australia';
+            update fundingAdmin;
         }
         return fundingAdmin;
     }
