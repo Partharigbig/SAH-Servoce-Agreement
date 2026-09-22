@@ -5,7 +5,7 @@ Admin1 User (005W2000000IqHt) started the flow interview.
 API Version for Running the Flow: 67
 Some of this flow's variables were set when the interview started.
 $Record = Case (5009p00000k7ehkAAA)
-Flow start time: <b>22 September 2026 at 10:39 pm</b>.
+Flow start time: <b>22 September 2026 at 10:57 pm</b>.
 
 
 Start Condition Requirements
@@ -49,34 +49,25 @@ Logic: All conditions must be true (AND)
 
 
 Decision: Escalation - Owner Type
-" Escalate_To_Manager " outcome was executed.
-$$:OutcomeExecuted:Escalate_To_Manager
-Outcome executed: Escalate_To_Manager
+The  default  outcome was executed.
+$$:OutcomeNotExecuted:Escalate_To_Manager
+Skipped this outcome because its conditions weren't met: Escalate_To_Manager
 Outcome conditions: 
-{!$Record.Owner_Is_Queue__c} (false) Equals false
+{!$Record.Owner_Is_Queue__c} (true) Equals false
 All conditions must be true (AND)
+$$:DefaultOutcomeExecuted:
+Default outcome executed.
 
 
-Get Records: Get Owner User for Escalation
-One or more  User  records were retrieved.
-Find all User records where:
-Id Equals {!$Record.OwnerId} (0059p00000T5EODAA3)
-Store the values of these fields in Get_Owner_User_for_Escalation: Id, ManagerId, Name
-Result
-Successfully found records.
-SOQL queries: 1 out of 100
-,SOQL query rows: 1 out of 50000
-
-
-Send Email: Email Manager Escalation
+Send Email: Email Unassigned Escalation
 Action  Send Email  was run.
 Inputs:
-emailAddresses = {!Get_Owner_User_for_Escalation.Manager.Email} (parthasarathy.s2@cognizant.com)
-emailSubject = Overdue Case Escalation - Action Needed
+emailAddresses = {!$Setup.Maintenance_Notification__c.Unassigned_Escalation_Email__c} (partha08sarathy@gmail.com)
+emailSubject = Unassigned Overdue Case Escalation - Action Needed
 emailBody = {!fEscalationBody} (Case Number: CS - 1817
 Link: https://mecwacare.lightning.force.com/lightning/r/Case/5009p00000k7ehkAAA
 Subject: 
-Assigned To: Partha S
+Assigned To: 
 Priority: Medium
 Status: New
 Date Opened: 2026-09-21
@@ -110,7 +101,7 @@ One or more  Case  records are ready to be updated.
 Update Case records whose IDs are stored in {!$Record}.
 Variable Values
 {
-  "LastModifiedDate": "22 September 2026 at 10:03 pm",
+  "LastModifiedDate": "22 September 2026 at 10:57 pm",
   "Update_Flag__c": false,
   "AccountId": "0019p00000jXi3ZAAS",
   "Equipment_hire_cancelled__c": false,
@@ -162,7 +153,7 @@ Variable Values
   "Infection_control_measures_followed__c": false,
   "Is_Submitted_For_Approval__c": false,
   "Area_made_safe_and_cleaned__c": false,
-  "Owner_Is_Queue__c": false,
+  "Owner_Is_Queue__c": true,
   "Client_NOK_notified_of_services_cancelle__c": false,
   "IsClosed": false,
   "Prepare_Payment_Requisition_Form_for_Tr__c": false,
@@ -172,7 +163,7 @@ Variable Values
   "Client_NOK_notified_of_equipment_collec__c": false,
   "Level__c": "3",
   "Current_Room__c": "ROOM – 0.",
-  "OwnerId": "0059p00000T5EODAA3",
+  "OwnerId": "00G9p0000045ruKEAQ",
   "RecordTypeId": "0129p000004WyQAAA0",
   "CaseNumber": "CS - 1817",
   "Process_diarise_for_days_65_to_70_to_che__c": false,
@@ -190,7 +181,7 @@ Variable Values
   "is_ServiceAgreement_generated__c": false,
   "BusinessApprovalRequiredCheckbox__c": false,
   "Send_Unspent_HC_Amounts_Notification_t__c": false,
-  "SystemModstamp": "22 September 2026 at 10:03 pm",
+  "SystemModstamp": "22 September 2026 at 10:57 pm",
   "Service_Agreement_End_date_updated__c": false,
   "Requires_External_Supplier__c": false,
   "Update_MAC_portal_to_end_clients_record__c": false,
@@ -216,7 +207,7 @@ Any records that the flow was ready to create, update, or delete were committed 
 
 
 How the Interview Finished
-The flow interview ran for 3.18 seconds and finished on 22 September 2026 at 10:39 pm.
+The flow interview ran for 2.56 seconds and finished on 22 September 2026 at 10:57 pm.
 
 
 Affected Records
