@@ -5,7 +5,7 @@ Admin1 User (005W2000000IqHt) started the flow interview.
 API Version for Running the Flow: 67
 Some of this flow's variables were set when the interview started.
 $Record = Case (5009p00000k7ehkAAA)
-Flow start time: <b>22 September 2026 at 10:33 pm</b>.
+Flow start time: <b>22 September 2026 at 10:39 pm</b>.
 
 
 Start Condition Requirements
@@ -69,9 +69,9 @@ SOQL queries: 1 out of 100
 
 
 Send Email: Email Manager Escalation
-We couldn't run action  Send Email  because something went wrong.
+Action  Send Email  was run.
 Inputs:
-emailAddresses = {!Get_Owner_User_for_Escalation.Manager.Email} (null)
+emailAddresses = {!Get_Owner_User_for_Escalation.Manager.Email} (parthasarathy.s2@cognizant.com)
 emailSubject = Overdue Case Escalation - Action Needed
 emailBody = {!fEscalationBody} (Case Number: CS - 1817
 Link: https://mecwacare.lightning.force.com/lightning/r/Case/5009p00000k7ehkAAA
@@ -83,17 +83,140 @@ Date Opened: 2026-09-21
 Due Date: 2026-09-14
 Days Overdue: 9)
 sendRichBody = false
-$$:Fault:
-Error Occurred: 0 recipients
+Outputs:
+None.
 
 
+Assignment: Mark Escalated
+2 variables were updated.
+{!$Record.Overdue_Escalated__c} Equals true
+{!varNeedsUpdate} Equals true
+Result
+{!varNeedsUpdate} = "true"
+{!$Record.Overdue_Escalated__c} = "true"
 
-Transaction Rolled Back
-Because an error occurred, any records that the flow was ready to create, update, or delete weren’t committed to the database.
+
+Decision: Anything To Save?
+" Save_Flags " outcome was executed.
+$$:OutcomeExecuted:Save_Flags
+Outcome executed: Save_Flags
+Outcome conditions: 
+{!varNeedsUpdate} (true) Equals true
+All conditions must be true (AND)
 
 
-An Error Occurred
-The flow interview failed on 22 September 2026 at 10:33 pm. It ran for 2.33 seconds.
+Update Records: Update Case Flags
+One or more  Case  records are ready to be updated.
+Update Case records whose IDs are stored in {!$Record}.
+Variable Values
+{
+  "LastModifiedDate": "22 September 2026 at 10:03 pm",
+  "Update_Flag__c": false,
+  "AccountId": "0019p00000jXi3ZAAS",
+  "Equipment_hire_cancelled__c": false,
+  "Review_and_process_any_unclaimed_expense__c": false,
+  "Employee_Name__c": "Partha S",
+  "Days_Overdue__c": 9,
+  "CheckClientStatus__c": false,
+  "Overdue_Notified__c": true,
+  "Calculate_unspent_amount__c": false,
+  "BusinessHoursId": "01mW2000000AOSTIA4",
+  "ProposedRoom__c": "ROOM – 0.",
+  "Approval_Process_Rejected__c": false,
+  "CreatedById": "0059p00000T5EODAA3",
+  "InitiateInvoiceAdjustmentCheckbox__c": false,
+  "Due_Date__c": "14 September 2026 at 8:30 am",
+  "IsClosedOnCreate": false,
+  "Status": "New",
+  "Personal_Alarm_Cancelled__c": false,
+  "Accommodation__c": "a009p00000MHSMqAAP",
+  "IsDeleted": false,
+  "Rostered_shifts_cancelled__c": false,
+  "dischargedateformula__c": "00/00/",
+  "caseSubjectFormula__c": "-Aus",
+  "View_Case__c": "_HL_ENCODED_/s/detail/5009p00000k7ehk_HL_CS - 1817_HL__self_HL_",
+  "Priority": "Medium",
+  "Asset__c": "a779p000000W1IjAAK",
+  "Clinical_care_coordinator__c": " ",
+  "RMT_Building__c": "Test3",
+  "Process_any_client_refund_if_applicable__c": false,
+  "IsStopped": false,
+  "Cabcharge_cancelled__c": false,
+  "IsEscalated": false,
+  "CurrentAccomodation__c": "_HL_ENCODED_/_HL_ _HL__blank_HL_",
+  "RMT_Room__c": "RH-TG-009",
+  "CreatedDate": "21 September 2026 at 5:57 pm",
+  "Extra_Conditions_Applicable__c": false,
+  "Id": "5009p00000k7ehkAAA",
+  "Approved_Reviewed_Date__c": "23 September 2026 at 5:30 am",
+  "CaseCreatedDateTime__c": "21 September 2026 at 5:57 pm",
+  "Overdue_Escalated__c": true,
+  "Follow_up_on_outstanding_invoices__c": false,
+  "RMT_Subject__c": "Aus - Medium - Test Asset",
+  "Bypass_validation_on_new__c": false,
+  "Voluntary_Assisted_Dying__c": false,
+  "Location_Zone__c": "route Delhi, 3144",
+  "Description": "Test case",
+  "RMT_Due_Date__c": "28 September 2026 at 5:30 am",
+  "Send_final_statement__c": false,
+  "Infection_control_measures_followed__c": false,
+  "Is_Submitted_For_Approval__c": false,
+  "Area_made_safe_and_cleaned__c": false,
+  "Owner_Is_Queue__c": false,
+  "Client_NOK_notified_of_services_cancelle__c": false,
+  "IsClosed": false,
+  "Prepare_Payment_Requisition_Form_for_Tr__c": false,
+  "Maintenance_Request_ID__c": "MRID-0573",
+  "Room__c": "RH-TG-009",
+  "Create_checklist_for_Finance_Team__c": false,
+  "Client_NOK_notified_of_equipment_collec__c": false,
+  "Level__c": "3",
+  "Current_Room__c": "ROOM – 0.",
+  "OwnerId": "0059p00000T5EODAA3",
+  "RecordTypeId": "0129p000004WyQAAA0",
+  "CaseNumber": "CS - 1817",
+  "Process_diarise_for_days_65_to_70_to_che__c": false,
+  "Location__c": "a0a9p00000BXJyPAAX",
+  "RMT_Level__c": "3",
+  "Building__c": "Test3",
+  "Send_Final_statement_to_Client__c": false,
+  "Current_User__c": false,
+  "Room_Status__c": "Under Offer",
+  "Full_adjustment_refund__c": false,
+  "Update_discharge_date_in_SA_Portal__c": false,
+  "Facility_manager__c": "Thiso GB",
+  "Unit_Number__c": "1",
+  "Vendors_notified_to_cancel_services__c": false,
+  "is_ServiceAgreement_generated__c": false,
+  "BusinessApprovalRequiredCheckbox__c": false,
+  "Send_Unspent_HC_Amounts_Notification_t__c": false,
+  "SystemModstamp": "22 September 2026 at 10:03 pm",
+  "Service_Agreement_End_date_updated__c": false,
+  "Requires_External_Supplier__c": false,
+  "Update_MAC_portal_to_end_clients_record__c": false,
+  "Resident_staff_informed__c": false,
+  "TwoDaysFromCaseCreation__c": "23 September 2026 at 8:30 am",
+  "Equipment_tested_and_operational__c": false,
+  "Dwelling_Access_Granted__c": false,
+  "Send_unspent_funds_notification_client__c": false,
+  "Open_More_than_15_days__c": false,
+  "LastModifiedById": "0059p00000T5EODAA3",
+  "Accomodation_type__c": "Affordable Housing"
+}
+Result
+All records whose IDs are in {!$Record} are ready to be updated when the next screen, pause, or local action is executed or when the interview finishes.
+SOQL queries: 9 out of 100
+,SOQL query rows: 7 out of 50000
+,DML statements: 2 out of 150
+,DML rows: 2 out of 10000
+
+
+Transaction Committed
+Any records that the flow was ready to create, update, or delete were committed to the database.
+
+
+How the Interview Finished
+The flow interview ran for 3.18 seconds and finished on 22 September 2026 at 10:39 pm.
 
 
 Affected Records
