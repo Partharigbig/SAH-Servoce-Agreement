@@ -1,0 +1,644 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <actionCalls>
+        <description>R3DV-2088: &quot;Escalation to Manager (7 Days Overdue)&quot;, subject &quot;Overdue Case
+            Escalation - Action Needed&quot;. Body adds Assigned To and Days Overdue per the AC.</description>
+        <name>Email_Manager_Escalation</name>
+        <label>Email Manager Escalation</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <actionName>emailSimple</actionName>
+        <actionType>emailSimple</actionType>
+        <connector>
+            <targetReference>Mark_Escalated</targetReference>
+        </connector>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>emailAddresses</name>
+            <value>
+                <elementReference>Get_Owner_User_for_Escalation.Manager.Email</elementReference>
+                <inputConfiguratorMode>Resource</inputConfiguratorMode>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailSubject</name>
+            <value>
+                <stringValue>Overdue Case Escalation - Action Needed</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailBody</name>
+            <value>
+                <elementReference>fEscalationBody</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>sendRichBody</name>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </inputParameters>
+        <nameSegment>emailSimple</nameSegment>
+        <offset>0</offset>
+    </actionCalls>
+    <actionCalls>
+        <description>R3DV-2088 AC3: &quot;Overdue Case Alert&quot; to the individual case owner. Body
+            carries Case Number as a link plus Subject, Priority, Status, Date Opened and Due
+            Date exactly as the AC lists them.</description>
+        <name>Email_Owner_Alert</name>
+        <label>Email Owner Alert</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <actionName>emailSimple</actionName>
+        <actionType>emailSimple</actionType>
+        <connector>
+            <targetReference>Mark_Notified</targetReference>
+        </connector>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>emailAddresses</name>
+            <value>
+                <elementReference>Get_Owner_User.Email</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailSubject</name>
+            <value>
+                <stringValue>Overdue Case Alert</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailBody</name>
+            <value>
+                <elementReference>fCaseDetailBody</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>sendRichBody</name>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </inputParameters>
+        <nameSegment>emailSimple</nameSegment>
+        <offset>0</offset>
+    </actionCalls>
+    <actionCalls>
+        <description>R3DV-2088: &quot;Owner: Assigned to ANY Queue&quot; branch, subject &quot;Unassigned
+            Overdue Case Alert&quot;. The recipient was left TBD in the story, so it is read from the
+            Maintenance Notification custom setting rather than hard-coded - business can set it
+            without a deployment.</description>
+        <name>Email_Unassigned_Alert</name>
+        <label>Email Unassigned Alert</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <actionName>emailSimple</actionName>
+        <actionType>emailSimple</actionType>
+        <connector>
+            <targetReference>Mark_Notified</targetReference>
+        </connector>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>emailAddresses</name>
+            <value>
+                <elementReference>$Setup.Maintenance_Notification__c.Unassigned_Case_Email__c</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailSubject</name>
+            <value>
+                <stringValue>Unassigned Overdue Case Alert</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailBody</name>
+            <value>
+                <elementReference>fCaseDetailBody</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>sendRichBody</name>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </inputParameters>
+        <nameSegment>emailSimple</nameSegment>
+        <offset>0</offset>
+    </actionCalls>
+    <actionCalls>
+        <description>R3DV-2088: &quot;Unassigned Overdue Case Escalation&quot;, subject &quot;Unassigned Overdue
+            Case Escalation - Action Needed&quot;. Recipient is the second TBD address, also held in
+            the custom setting.</description>
+        <name>Email_Unassigned_Escalation</name>
+        <label>Email Unassigned Escalation</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <actionName>emailSimple</actionName>
+        <actionType>emailSimple</actionType>
+        <connector>
+            <targetReference>Mark_Escalated</targetReference>
+        </connector>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>emailAddresses</name>
+            <value>
+                <elementReference>$Setup.Maintenance_Notification__c.Unassigned_Escalation_Email__c</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailSubject</name>
+            <value>
+                <stringValue>Unassigned Overdue Case Escalation - Action Needed</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>emailBody</name>
+            <value>
+                <elementReference>fEscalationBody</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>sendRichBody</name>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </inputParameters>
+        <nameSegment>emailSimple</nameSegment>
+        <offset>0</offset>
+    </actionCalls>
+    <actionCalls>
+        <description>R3DV-2088 AC2: in-app/mobile notification with the exact wording specified
+            by the AC.</description>
+        <name>Send_Salesforce_Notification</name>
+        <label>Send Salesforce Notification</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <actionName>customNotificationAction</actionName>
+        <actionType>customNotificationAction</actionType>
+        <connector>
+            <targetReference>Email_Owner_Alert</targetReference>
+        </connector>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>customNotifTypeId</name>
+            <value>
+                <elementReference>Get_Notification_Type.Id</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>recipientIds</name>
+            <value>
+                <elementReference>colRecipientIds</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>title</name>
+            <value>
+                <stringValue>Overdue Maintenance Case</stringValue>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>body</name>
+            <value>
+                <elementReference>fNotificationBody</elementReference>
+            </value>
+        </inputParameters>
+        <inputParameters>
+            <name>targetId</name>
+            <value>
+                <elementReference>$Record.Id</elementReference>
+            </value>
+        </inputParameters>
+        <nameSegment>customNotificationAction</nameSegment>
+        <offset>0</offset>
+    </actionCalls>
+    <apiVersion>67.0</apiVersion>
+    <areMetricsLoggedToDataCloud>false</areMetricsLoggedToDataCloud>
+    <assignments>
+        <name>Add_Owner_To_Recipients</name>
+        <label>Add Owner To Recipients</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignmentItems>
+            <assignToReference>colRecipientIds</assignToReference>
+            <operator>Add</operator>
+            <value>
+                <elementReference>$Record.OwnerId</elementReference>
+            </value>
+        </assignmentItems>
+        <connector>
+            <targetReference>Send_Salesforce_Notification</targetReference>
+        </connector>
+    </assignments>
+    <assignments>
+        <name>Mark_Escalated</name>
+        <label>Mark Escalated</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.Overdue_Escalated__c</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <booleanValue>true</booleanValue>
+            </value>
+        </assignmentItems>
+        <assignmentItems>
+            <assignToReference>varNeedsUpdate</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <booleanValue>true</booleanValue>
+            </value>
+        </assignmentItems>
+        <connector>
+            <targetReference>Anything_To_Save</targetReference>
+        </connector>
+    </assignments>
+    <assignments>
+        <name>Mark_Notified</name>
+        <label>Mark Notified</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.Overdue_Notified__c</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <booleanValue>true</booleanValue>
+            </value>
+        </assignmentItems>
+        <assignmentItems>
+            <assignToReference>varNeedsUpdate</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <booleanValue>true</booleanValue>
+            </value>
+        </assignmentItems>
+        <connector>
+            <targetReference>Needs_Escalation</targetReference>
+        </connector>
+    </assignments>
+    <decisions>
+        <description>Guards the DML so cases that are not yet overdue cost zero DML on the daily
+            run - important because this job sweeps the whole open maintenance backlog.</description>
+        <name>Anything_To_Save</name>
+        <label>Anything To Save?</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnectorLabel>Nothing Changed</defaultConnectorLabel>
+        <rules>
+            <name>Save_Flags</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>varNeedsUpdate</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>true</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Update_Case_Flags</targetReference>
+            </connector>
+            <label>Save Flags</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <name>Escalation_Owner_Type</name>
+        <label>Escalation - Owner Type</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnector>
+            <targetReference>Email_Unassigned_Escalation</targetReference>
+        </defaultConnector>
+        <defaultConnectorLabel>Owned By Queue</defaultConnectorLabel>
+        <rules>
+            <name>Escalate_To_Manager</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.Owner_Is_Queue__c</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>false</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Get_Owner_User_for_Escalation</targetReference>
+            </connector>
+            <label>Escalate To Manager</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <description>Splits the two branches R3DV-2088 defines: &quot;Owner: Individual User&quot; gets a
+            Salesforce notification AND an email; &quot;Owner: Assigned to ANY Queue&quot; gets a single
+            email to the TBD address.</description>
+        <name>First_Alert_Owner_Type</name>
+        <label>First Alert - Owner Type</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnector>
+            <targetReference>Email_Unassigned_Alert</targetReference>
+        </defaultConnector>
+        <defaultConnectorLabel>Owned By Queue</defaultConnectorLabel>
+        <rules>
+            <name>Owned_By_User</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.Owner_Is_Queue__c</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>false</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Get_Owner_User</targetReference>
+            </connector>
+            <label>Owned By User</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <description>SCOPE ASSUMPTION: R3DV-2088 does not name a record type. Scoped to the two
+            maintenance record types rather than every Case in the org - an unscoped daily scan
+            over all Cases would be a material volume risk in an org this size, and the story
+            sits inside the Asset Management epic.</description>
+        <name>Is_Maintenance_Record_Type</name>
+        <label>Is Maintenance Record Type?</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnectorLabel>Not a Maintenance Ticket</defaultConnectorLabel>
+        <rules>
+            <name>Maintenance_Ticket</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>fIsMaintenanceRecordType</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>true</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Needs_First_Alert</targetReference>
+            </connector>
+            <label>Maintenance Ticket</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <description>R3DV-2088: escalation at 7 days overdue, also one-time.</description>
+        <name>Needs_Escalation</name>
+        <label>Needs Escalation?</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnectorLabel>No Escalation</defaultConnectorLabel>
+        <rules>
+            <name>Escalation_Due</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.Days_Overdue__c</leftValueReference>
+                <operator>GreaterThanOrEqualTo</operator>
+                <rightValue>
+                    <numberValue>7.0</numberValue>
+                </rightValue>
+            </conditions>
+            <conditions>
+                <leftValueReference>$Record.Overdue_Escalated__c</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>false</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Escalation_Owner_Type</targetReference>
+            </connector>
+            <label>Escalation Due</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <description>R3DV-2088 AC1: &quot;Generated ONCE only - will not be repeated&quot;, enforced by the
+            Overdue Notified flag.</description>
+        <name>Needs_First_Alert</name>
+        <label>Needs First Alert?</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <defaultConnector>
+            <targetReference>Needs_Escalation</targetReference>
+        </defaultConnector>
+        <defaultConnectorLabel>Already Alerted</defaultConnectorLabel>
+        <rules>
+            <name>First_Alert_Due</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.Days_Overdue__c</leftValueReference>
+                <operator>GreaterThanOrEqualTo</operator>
+                <rightValue>
+                    <numberValue>1.0</numberValue>
+                </rightValue>
+            </conditions>
+            <conditions>
+                <leftValueReference>$Record.Overdue_Notified__c</leftValueReference>
+                <operator>EqualTo</operator>
+                <rightValue>
+                    <booleanValue>false</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>First_Alert_Owner_Type</targetReference>
+            </connector>
+            <label>First Alert Due</label>
+        </rules>
+    </decisions>
+    <description>R3DV-2088: overdue Case notification and escalation. All four branches the story
+        defines are consolidated into ONE daily scheduled flow on Case rather than four separate
+        automations, so ordering is deterministic and the backlog is swept once.
+
+        Branch 1 - owner is a user, 1+ days overdue: Salesforce notification + email (once).
+        Branch 2 - owner is a queue, 1+ days overdue: email to the TBD address (once).
+        Branch 3 - owner is a user, 7+ days overdue: email to the owner&apos;s manager (once).
+        Branch 4 - owner is a queue, 7+ days overdue: email to the TBD escalation address (once).
+
+        TBD RECIPIENTS: both addresses the story left as &quot;[TBD email address]&quot; are held in the
+        Maintenance_Notification__c hierarchy custom setting, so business can supply them without
+        a code change and they can differ per sandbox.
+        IDEMPOTENCY: Overdue_Notified__c and Overdue_Escalated__c are separate flags so the
+        7-day escalation cannot be suppressed by the first alert having already fired.
+        BULKIFICATION: one interview per record in batches of 200 with DML aggregated per
+        element. The entry filter narrows to open Cases that have a Due Date; the overdue
+        threshold and the two one-time flags are then evaluated by the flow&apos;s own decisions.
+        NOTE: schedule-triggered flows do not accept filterFormula, so structured filters are
+        used - verified by validation deploy.</description>
+    <environments>Default</environments>
+    <formulas>
+        <description>R3DV-2088 AC3: Case Number (link), Subject, Priority, Status, Date Opened,
+            Due Date.</description>
+        <name>fCaseDetailBody</name>
+        <dataType>String</dataType>
+        <expression>&quot;Case Number: &quot; &amp; {!$Record.CaseNumber} &amp; BR() &amp;
+&quot;Link: &quot; &amp; {!$Setup.Maintenance_Notification__c.Org_Base_URL__c} &amp; &quot;/&quot; &amp; {!$Record.Id} &amp; BR() &amp;
+&quot;Subject: &quot; &amp; {!$Record.Subject} &amp; BR() &amp;
+&quot;Priority: &quot; &amp; TEXT({!$Record.Priority}) &amp; BR() &amp;
+&quot;Status: &quot; &amp; TEXT({!$Record.Status}) &amp; BR() &amp;
+&quot;Date Opened: &quot; &amp; TEXT(DATEVALUE({!$Record.CreatedDate})) &amp; BR() &amp;
+&quot;Due Date: &quot; &amp; TEXT(DATEVALUE({!$Record.Due_Date__c}))</expression>
+    </formulas>
+    <formulas>
+        <description>R3DV-2088: escalation body adds Assigned To and Days Overdue.</description>
+        <name>fEscalationBody</name>
+        <dataType>String</dataType>
+        <expression>&quot;Case Number: &quot; &amp; {!$Record.CaseNumber} &amp; BR() &amp;
+&quot;Link: &quot; &amp; {!$Setup.Maintenance_Notification__c.Org_Base_URL__c} &amp; &quot;/&quot; &amp; {!$Record.Id} &amp; BR() &amp;
+&quot;Subject: &quot; &amp; {!$Record.Subject} &amp; BR() &amp;
+&quot;Assigned To: &quot; &amp; {!Get_Owner_User_for_Escalation.Name} &amp; BR() &amp;
+&quot;Priority: &quot; &amp; TEXT({!$Record.Priority}) &amp; BR() &amp;
+&quot;Status: &quot; &amp; TEXT({!$Record.Status}) &amp; BR() &amp;
+&quot;Date Opened: &quot; &amp; TEXT(DATEVALUE({!$Record.CreatedDate})) &amp; BR() &amp;
+&quot;Due Date: &quot; &amp; TEXT(DATEVALUE({!$Record.Due_Date__c})) &amp; BR() &amp;
+&quot;Days Overdue: &quot; &amp; TEXT({!$Record.Days_Overdue__c})</expression>
+    </formulas>
+    <formulas>
+        <name>fIsMaintenanceRecordType</name>
+        <dataType>Boolean</dataType>
+        <expression>OR({!$Record.RecordType.DeveloperName} = &quot;Reactive_Maintenance_Ticket&quot;,
+   {!$Record.RecordType.DeveloperName} = &quot;Maintenance&quot;)</expression>
+    </formulas>
+    <formulas>
+        <description>R3DV-2088 AC2 verbatim wording.</description>
+        <name>fNotificationBody</name>
+        <dataType>String</dataType>
+        <expression>&quot;Overdue! Case #&quot; &amp; {!$Record.CaseNumber} &amp; &quot; titled &quot; &amp;
+{!$Record.Subject} &amp; &quot; is overdue. Please take immediate action to resolve it.&quot;</expression>
+    </formulas>
+    <interviewLabel>Case Overdue Daily {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>Case - Daily Overdue Notification</label>
+    <processMetadataValues>
+        <name>BuilderType</name>
+        <value>
+            <stringValue>LightningFlowBuilder</stringValue>
+        </value>
+    </processMetadataValues>
+    <processMetadataValues>
+        <name>CanvasMode</name>
+        <value>
+            <stringValue>AUTO_LAYOUT_CANVAS</stringValue>
+        </value>
+    </processMetadataValues>
+    <processType>AutoLaunchedFlow</processType>
+    <recordLookups>
+        <description>Resolves the custom notification type by developer name so no Id is
+            hard-coded.</description>
+        <name>Get_Notification_Type</name>
+        <label>Get Notification Type</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignNullValuesIfNoRecordsFound>false</assignNullValuesIfNoRecordsFound>
+        <connector>
+            <targetReference>Add_Owner_To_Recipients</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>DeveloperName</field>
+            <operator>EqualTo</operator>
+            <value>
+                <stringValue>Maintenance_Overdue_Case</stringValue>
+            </value>
+        </filters>
+        <getFirstRecordOnly>true</getFirstRecordOnly>
+        <object>CustomNotificationType</object>
+        <queriedFields>Id</queriedFields>
+        <storeOutputAutomatically>true</storeOutputAutomatically>
+    </recordLookups>
+    <recordLookups>
+        <description>Only reached when the owner is a user. Provides the owner&apos;s email for the
+            first alert and, via Manager.Email, the recipient for the 7-day escalation.</description>
+        <name>Get_Owner_User</name>
+        <label>Get Owner User</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignNullValuesIfNoRecordsFound>false</assignNullValuesIfNoRecordsFound>
+        <connector>
+            <targetReference>Get_Notification_Type</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>Id</field>
+            <operator>EqualTo</operator>
+            <value>
+                <elementReference>$Record.OwnerId</elementReference>
+            </value>
+        </filters>
+        <getFirstRecordOnly>true</getFirstRecordOnly>
+        <object>User</object>
+        <storeOutputAutomatically>true</storeOutputAutomatically>
+    </recordLookups>
+    <recordLookups>
+        <name>Get_Owner_User_for_Escalation</name>
+        <label>Get Owner User for Escalation</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <assignNullValuesIfNoRecordsFound>false</assignNullValuesIfNoRecordsFound>
+        <connector>
+            <targetReference>Email_Manager_Escalation</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>Id</field>
+            <operator>EqualTo</operator>
+            <value>
+                <elementReference>$Record.OwnerId</elementReference>
+            </value>
+        </filters>
+        <getFirstRecordOnly>true</getFirstRecordOnly>
+        <object>User</object>
+        <storeOutputAutomatically>true</storeOutputAutomatically>
+    </recordLookups>
+    <recordUpdates>
+        <name>Update_Case_Flags</name>
+        <label>Update Case Flags</label>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <inputReference>$Record</inputReference>
+    </recordUpdates>
+    <start>
+        <locationX>0</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>Is_Maintenance_Record_Type</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>IsClosed</field>
+            <operator>EqualTo</operator>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </filters>
+        <filters>
+            <field>Due_Date__c</field>
+            <operator>IsNull</operator>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </filters>
+        <object>Case</object>
+        <schedule>
+            <dayOfMonthToRun>0</dayOfMonthToRun>
+            <frequency>Daily</frequency>
+            <frequencyNumber>0</frequencyNumber>
+            <startDate>2026-09-01</startDate>
+            <startTime>06:00:00.000Z</startTime>
+        </schedule>
+        <triggerType>Scheduled</triggerType>
+    </start>
+    <status>Active</status>
+    <variables>
+        <name>colRecipientIds</name>
+        <dataType>String</dataType>
+        <isCollection>true</isCollection>
+        <isInput>false</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+    <variables>
+        <name>varNeedsUpdate</name>
+        <dataType>Boolean</dataType>
+        <isCollection>false</isCollection>
+        <isInput>false</isInput>
+        <isOutput>false</isOutput>
+        <value>
+            <booleanValue>false</booleanValue>
+        </value>
+    </variables>
+</Flow>
