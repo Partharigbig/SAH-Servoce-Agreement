@@ -1,0 +1,101 @@
+How the Interview Started
+This flow was scheduled to start at  06:00 AM Sep 1, 2026 .
+How the Interview Started
+Admin1 User (005W2000000IqHt) started the flow interview.
+API Version for Running the Flow: 67
+Some of this flow's variables were set when the interview started.
+$Record = Case (5009p00000k7ehkAAA)
+Flow start time: <b>22 September 2026 at 10:33 pm</b>.
+
+
+Start Condition Requirements
+The triggering record met the start conditions.
+The triggering record met the condition requirements.
+<b>Entry Conditions</b>
+1. IsClosed (false) Equals false
+2. Due_Date__c (Mon Sep 14 03:00:00 GMT 2026) Is null false
+Logic: All conditions must be true (AND)
+
+
+Decision: Is Maintenance Record Type?
+" Maintenance_Ticket " outcome was executed.
+$$:OutcomeExecuted:Maintenance_Ticket
+Outcome executed: Maintenance_Ticket
+Outcome conditions: 
+{!fIsMaintenanceRecordType} (true) Equals true
+All conditions must be true (AND)
+
+
+Decision: Needs First Alert?
+The  default  outcome was executed.
+$$:OutcomeNotExecuted:First_Alert_Due
+Skipped this outcome because its conditions weren't met: First_Alert_Due
+Outcome conditions: 
+1. {!$Record.Days_Overdue__c} (9) Greater than or equal 1
+2. {!$Record.Overdue_Notified__c} (true) Equals false
+Logic: All conditions must be true (AND)
+$$:DefaultOutcomeExecuted:
+Default outcome executed.
+
+
+Decision: Needs Escalation?
+" Escalation_Due " outcome was executed.
+$$:OutcomeExecuted:Escalation_Due
+Outcome executed: Escalation_Due
+Outcome conditions: 
+1. {!$Record.Days_Overdue__c} (9) Greater than or equal 7
+2. {!$Record.Overdue_Escalated__c} (false) Equals false
+Logic: All conditions must be true (AND)
+
+
+Decision: Escalation - Owner Type
+" Escalate_To_Manager " outcome was executed.
+$$:OutcomeExecuted:Escalate_To_Manager
+Outcome executed: Escalate_To_Manager
+Outcome conditions: 
+{!$Record.Owner_Is_Queue__c} (false) Equals false
+All conditions must be true (AND)
+
+
+Get Records: Get Owner User for Escalation
+One or more  User  records were retrieved.
+Find all User records where:
+Id Equals {!$Record.OwnerId} (0059p00000T5EODAA3)
+Store the values of these fields in Get_Owner_User_for_Escalation: Id, ManagerId, Name
+Result
+Successfully found records.
+SOQL queries: 1 out of 100
+,SOQL query rows: 1 out of 50000
+
+
+Send Email: Email Manager Escalation
+We couldn't run action  Send Email  because something went wrong.
+Inputs:
+emailAddresses = {!Get_Owner_User_for_Escalation.Manager.Email} (null)
+emailSubject = Overdue Case Escalation - Action Needed
+emailBody = {!fEscalationBody} (Case Number: CS - 1817
+Link: https://mecwacare.lightning.force.com/lightning/r/Case/5009p00000k7ehkAAA
+Subject: 
+Assigned To: Partha S
+Priority: Medium
+Status: New
+Date Opened: 2026-09-21
+Due Date: 2026-09-14
+Days Overdue: 9)
+sendRichBody = false
+$$:Fault:
+Error Occurred: 0 recipients
+
+
+
+Transaction Rolled Back
+Because an error occurred, any records that the flow was ready to create, update, or delete weren’t committed to the database.
+
+
+An Error Occurred
+The flow interview failed on 22 September 2026 at 10:33 pm. It ran for 2.33 seconds.
+
+
+Affected Records
+Schedule-triggered flows affect batches of records. Your org can run 793000 schedule-triggered flows per day.
+When triggered, this flow impacts 711 records.
